@@ -331,9 +331,9 @@ CREATE TABLE score (
   d               REAL NOT NULL CHECK (d BETWEEN -2.0 AND 2.0),   -- derived
   conv            REAL NOT NULL CHECK (conv BETWEEN 1 AND 10),    -- derived
   directive       TEXT NOT NULL,                                  -- derived
-  queue_reason    TEXT NOT NULL,     -- 'flagged' | 'open_trade' | 'both'
-  position_state  TEXT NOT NULL,     -- 'flat' | 'long:N' | 'short:N' where N = open units
-  params_json     TEXT NOT NULL,     -- resolved weights and thresholds, snapshotted
+  queue_reason    TEXT NOT NULL,     -- derived: 'flagged' | 'open_trade' | 'both'
+  position_state  TEXT NOT NULL,     -- derived: 'flat' | 'long:N' | 'short:N', N = open units
+  params_json     TEXT NOT NULL,     -- derived: resolved weights and thresholds, snapshotted
   rationale       TEXT,
   recorded_at     TEXT NOT NULL,
   PRIMARY KEY (session_date, asset_id)
@@ -400,6 +400,10 @@ never leaves a stale total behind.
 `score record` takes agent-supplied **factors**, each on the same -2.0..+2.0 scale, and
 derives `d` and `conv` from them. The initial factor set is `catalyst`, `trend`,
 `secular`, `crowding`, and it is expected to change.
+
+The factors and an optional rationale are the **only** inputs. Everything else on the
+score row is derived at record time from data janus already holds — the agent never
+supplies `d`, `conv`, `directive`, `queue_reason` or `position_state`.
 
 Factors are open-ended: any `--factor key=value` is accepted and stored. Only keys with
 a resolved weight contribute to `d`; a factor with no weight is recorded but ignored in
