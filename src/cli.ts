@@ -7,6 +7,7 @@ const NOUNS: Record<string, () => Promise<{ handle: Handler }>> = {
   market: () => import("./cli/market.ts"),
   cluster: () => import("./cli/cluster.ts"),
   asset: () => import("./cli/asset.ts"),
+  session: () => import("./cli/session.ts"),
 };
 
 async function main(): Promise<void> {
