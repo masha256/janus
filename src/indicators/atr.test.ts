@@ -19,3 +19,12 @@ test("atr accounts for gaps via the previous close", () => {
 test("atr returns null when there are fewer bars than the period", () => {
   assert.equal(atr([bar(11, 9, 10)], 14), null);
 });
+
+test("atr accounts for downward gaps via the previous close", () => {
+  // First bar: range 2 (51-49), close 50
+  // Second bar: range 2 (20-18), close 19, but gaps down from 50
+  // TR₁ = 2; TR₂ = max(2, |20-50|, |18-50|) = max(2, 30, 32) = 32
+  // ATR = (2 + 32) / 2 = 17
+  const bars: Bar[] = [bar(51, 49, 50), bar(20, 18, 19)];
+  assert.equal(atr(bars, 2), 17);
+});

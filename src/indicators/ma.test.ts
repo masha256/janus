@@ -29,3 +29,10 @@ test("emaSeries is null-padded before the seed index", () => {
 test("ema returns null when history is shorter than the period", () => {
   assert.equal(ema([1, 2], 3), null);
 });
+
+test("a non-positive period yields nulls, never NaN", () => {
+  assert.deepEqual(smaSeries([1, 2, 3], 0), [null, null, null]);
+  assert.deepEqual(smaSeries([1, 2, 3], -1), [null, null, null]);
+  assert.equal(sma([1, 2, 3], 0), null);
+  assert.equal(ema([1, 2, 3], 0), null);
+});

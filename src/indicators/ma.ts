@@ -1,4 +1,7 @@
 export function smaSeries(values: number[], period: number): (number | null)[] {
+  // Without this guard a period <= 0 makes values[i - period] read past the end,
+  // and the non-null assertion below turns that undefined into silent NaN.
+  if (period < 1) return new Array(values.length).fill(null);
   const out: (number | null)[] = [];
   let sum = 0;
   for (let i = 0; i < values.length; i++) {
