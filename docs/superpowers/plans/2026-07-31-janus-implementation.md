@@ -20,6 +20,12 @@
 - **Relative imports use the `.ts` extension** (`import { sma } from "./ma.ts"`). `rewriteRelativeImportExtensions` converts them to `.js` on build. Verified working.
 - **`erasableSyntaxOnly: true`.** No `enum`, no parameter properties, no namespaces — Node's type-stripper rejects them.
 - **Every command prints exactly one JSON object to stdout** and nothing else. Diagnostics go to stderr. Exit 0 on success, 1 on error.
+- **A bad flag is a `VALIDATION` error, never `INTERNAL`.** `node:util.parseArgs` throws its own
+  `TypeError`s (`ERR_PARSE_ARGS_UNKNOWN_OPTION`, `ERR_PARSE_ARGS_INVALID_OPTION_VALUE`,
+  `ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL`) for an unrecognised flag or a value starting with `-`
+  (e.g. `--limit -5`). `envelope()` in `src/output.ts` maps any error whose `.code` begins with
+  `ERR_PARSE_ARGS_` to `VALIDATION`, so this is handled once at the funnel — command modules must
+  not each wrap their own `parseArgs` call.
 - **All money values (`notional`, `risk`, `initial_risk`) are USD.** All price values (`stop`, `entry_price`, `initial_price`) are in the market's own units.
 - **Scales:** `d` and all factors and scores are `-2.0..+2.0`. `conv` is `1..10`. `confidence` is `0.0..2.0` (a ± margin, never negative).
 - **Dates are `YYYY-MM-DD` strings resolved in `America/New_York`.** Timestamps are ISO-8601 UTC strings.
