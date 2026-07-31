@@ -18,8 +18,9 @@ deterministic indicators, and derives a directive from agent-supplied judgement.
 |---|---|
 | Price, OHLCV, open interest | Janus, via Lighter REST API |
 | Moving averages, crosses, ATR | Janus, computed from bars |
-| Market sentiment, cluster judgement, screen score, D, Conv | Agent, supplied as CLI args |
-| Directive (INITIATE/ADD/HOLD/TRIM/EXIT/STAND_ASIDE) | Janus, derived |
+| Market sentiment, cluster judgement, screen score, scoring factors | Agent, supplied as CLI args |
+| D and Conv | Janus, derived from agent factors and cluster weights |
+| Directive (INITIATE/ADD/HOLD/TRIM/EXIT/STAND_ASIDE) | Janus, derived from D and Conv |
 | Flag decision in screening | Janus, by threshold against agent score |
 | Position size, stop placement | Operator for now; see Deferred |
 
@@ -124,10 +125,23 @@ never creates one, and never records a session as though it happened on another 
 ```
 regime        → 1 row per session
 cluster read  → 1 row per cluster
-coverage      → roster assets where active = 1     (only pipeline phase using the network)
+coverage      → eligible assets                    (only pipeline phase using the network)
 screening     → assets with coverage this session
-scoring       → assets flagged by screening this session
+scoring       → assets flagged this session, UNION assets with an open trade
 ```
+
+**Coverage eligibility** is `asset.active = 1 AND market.status = 'active'`, union any
+asset carrying an open trade. A position you still hold must not go dark because the
+asset was deactivated or delisted while you were in it.
+
+**Scoring is not run on every asset.** The scoring set is the union of assets the screen
+flagged this session and assets with an open trade — an open position needs a directive
+every day regardless of whether it screened, since `HOLD`, `TRIM` and `EXIT` are only
+reachable from a position. `janus score queue` returns exactly that set, with each
+asset's reason (`flagged`, `open_trade`, or both) and its coverage row, so the scoring
+agent can load its working set in one call.
+
+Recording a score for an asset outside the queue fails with `NOT_FLAGGED`.
 
 Each phase narrows the set produced by the previous one. Running a phase when an earlier
 one is incomplete fails with `{code: "PHASE_ORDER"}` naming the missing phase, and is
@@ -176,6 +190,7 @@ src/
     cross.ts          cross detection and age in bars
   domain/
     params.ts         cluster-first / global-fallback resolution
+    score.ts          (factors, weights) => {d, conv}                 [pure]
     directive.ts      (d, conv, positionState, params) => Directive   [pure]
     sizing.ts         position sizing                                 [deferred]
     trade-math.ts     avg entry, aggregate risk, R-multiple           [pure]
@@ -249,6 +264,7 @@ CREATE TABLE regime_read (
   session_date  TEXT PRIMARY KEY REFERENCES session(session_date) ON DELETE CASCADE,
   state         TEXT NOT NULL CHECK (state IN ('RISK_ON','NEUTRAL','RISK_OFF')),
   score         REAL NOT NULL CHECK (score BETWEEN -2.0 AND 2.0),
+  confidence    REAL NOT NULL CHECK (confidence BETWEEN -2.0 AND 2.0),
   summary       TEXT NOT NULL,
   recorded_at   TEXT NOT NULL
 );
@@ -294,7 +310,8 @@ CREATE TABLE coverage (
 CREATE TABLE screen (
   session_date  TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
   asset_id      INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
-  score         REAL NOT NULL,
+  score         REAL NOT NULL CHECK (score BETWEEN -2.0 AND 2.0),
+  confidence    REAL NOT NULL CHECK (confidence BETWEEN -2.0 AND 2.0),
   threshold     REAL NOT NULL,        -- resolved value at time of decision
   flagged       INTEGER NOT NULL,
   rationale     TEXT,
@@ -305,14 +322,26 @@ CREATE TABLE screen (
 CREATE TABLE score (
   session_date    TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
   asset_id        INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
-  d               REAL NOT NULL CHECK (d BETWEEN -2.0 AND 2.0),
-  conv            REAL NOT NULL CHECK (conv BETWEEN 1 AND 10),
-  directive       TEXT NOT NULL,
+  d               REAL NOT NULL CHECK (d BETWEEN -2.0 AND 2.0),   -- derived
+  conv            REAL NOT NULL CHECK (conv BETWEEN 1 AND 10),    -- derived
+  directive       TEXT NOT NULL,                                  -- derived
+  queue_reason    TEXT NOT NULL,     -- 'flagged' | 'open_trade' | 'both'
   position_state  TEXT NOT NULL,     -- 'flat' | 'long:N' | 'short:N' where N = open units
-  params_json     TEXT NOT NULL,     -- resolved thresholds, snapshotted
+  params_json     TEXT NOT NULL,     -- resolved weights and thresholds, snapshotted
   rationale       TEXT,
   recorded_at     TEXT NOT NULL,
   PRIMARY KEY (session_date, asset_id)
+);
+
+CREATE TABLE score_factor (
+  session_date  TEXT NOT NULL,
+  asset_id      INTEGER NOT NULL,
+  key           TEXT NOT NULL,       -- 'catalyst' | 'trend' | 'secular' | 'crowding' | …
+  value         REAL NOT NULL CHECK (value BETWEEN -2.0 AND 2.0),
+  weight        REAL NOT NULL,       -- resolved weight applied, snapshotted
+  PRIMARY KEY (session_date, asset_id, key),
+  FOREIGN KEY (session_date, asset_id) REFERENCES score(session_date, asset_id)
+    ON DELETE CASCADE
 );
 
 CREATE TABLE trade (
@@ -360,10 +389,60 @@ Nothing is denormalized. Average entry, total notional, aggregate open risk
 (Σ size × distance-to-stop) and R-multiple are computed on read, so correcting a unit
 never leaves a stale total behind.
 
+## Score derivation — v1
+
+`score record` takes agent-supplied **factors**, each on the same -2.0..+2.0 scale, and
+derives `d` and `conv` from them. The initial factor set is `catalyst`, `trend`,
+`secular`, `crowding`, and it is expected to change.
+
+Factors are open-ended: any `--factor key=value` is accepted and stored. Only keys with
+a resolved weight contribute to `d`; a factor with no weight is recorded but ignored in
+the math, so a new factor can be collected and evaluated for a while before it is given
+a weight and allowed to move scores.
+
+Weights are cluster params named `w_<factor>`, resolved cluster-first with global
+fallback like every other parameter. Defaults: `w_catalyst` 1.0, `w_trend` 1.0,
+`w_secular` 1.0, `w_crowding` **-1.0** — crowding is an inverted factor, and a negative
+weight expresses that without special-casing.
+
+```
+d    = clamp( Σ(wₖ · fₖ) / Σ|wₖ| , -2, +2 )
+agree = | Σ(sign(wₖ · fₖ) · |wₖ|) | / Σ|wₖ|            ∈ [0, 1]
+conv = clamp( round( 1 + 9 · (0.5 · |d|/2 + 0.5 · agree) ), 1, 10 )
+```
+
+`d` is a weighted mean, so it stays in range without the clamp doing real work. `conv`
+rewards two different things equally: the strength of the signal (`|d|`) and the
+agreement between factors (`agree` is 1.0 when every weighted factor points the same
+way, 0.0 when they cancel). Four mildly bullish factors therefore outrank one strongly
+bullish factor contradicted by three others, which is the intended behaviour.
+
+Both the factor values and the weights actually applied are snapshotted into
+`score_factor`, so any historical score can be re-derived and explained after a retune.
+
+Worked examples under the default weights, which double as the test fixture:
+
+| catalyst | trend | secular | crowding | d | agree | conv |
+|---|---|---|---|---|---|---|
+| +2 | +2 | +2 | -2 (uncrowded) | +2.00 | 1.00 | 10 |
+| +2 | +2 | +2 | +2 (crowded) | +1.00 | 0.50 | 6 |
+| +0.5 | +0.5 | +0.5 | -0.5 | +0.50 | 1.00 | 7 |
+| +2 | -1 | -1 | +1 | -0.25 | 0.50 | 4 |
+| 0 | +2 | 0 | 0 | +0.50 | 0.25 | 3 |
+| 0 | 0 | 0 | 0 | 0.00 | 0.00 | 1 |
+| -2 | -2 | -2 | +2 | -2.00 | 1.00 | 10 |
+
+Note rows 2 and 3: four mildly-aligned factors (conv 7) outrank three strong factors
+undercut by heavy crowding (conv 6), and a lone trend signal with nothing corroborating
+it lands at conv 3. Neutral factors count as non-corroborating rather than as
+disagreement, so a thin thesis scores thin.
+
+This formula is a placeholder, confined to `domain/score.ts` as one pure function.
+
 ## Directive derivation — v1
 
-Inputs: `d` ∈ [-2.0, +2.0] (sign is the direction), `conv` ∈ [1, 10], the asset's current
-position state, and cluster-resolved thresholds.
+Inputs: the derived `d` ∈ [-2.0, +2.0] (sign is the direction) and `conv` ∈ [1, 10], the
+asset's current position state, and cluster-resolved thresholds.
 
 | Position state | Condition | Directive |
 |---|---|---|
@@ -387,6 +466,10 @@ Defaults, all overridable per cluster:
 | `d_exit` | 1.0 |
 | `max_units` | 4 |
 | `screen_flag_threshold` | 1.0 |
+| `w_catalyst` | 1.0 |
+| `w_trend` | 1.0 |
+| `w_secular` | 1.0 |
+| `w_crowding` | -1.0 |
 
 This is a deliberate placeholder. It lives entirely in `domain/directive.ts` as one pure
 function with a table-driven test suite, so replacing it later is a single-file change
@@ -418,13 +501,15 @@ janus asset rm <symbol>
 janus session status [--date YYYY-MM-DD]
 janus session list [--limit N]
 
-janus regime record --state STATE --score N --summary - [--metric key=value ...]
+janus regime record --state STATE --score N --confidence N --summary -
+                    [--metric key=value ...]
 janus cluster-read record <cluster> --bias N --judgement -
 janus coverage run [--asset SYM[,SYM...]] [--force]
 janus coverage list [--date D] [--asset SYM[,SYM...]]
-janus screen record <symbol> --score N [--rationale -]
+janus screen record <symbol> --score N --confidence N [--rationale -]
 janus screen list [--flagged] [--date D]
-janus score record <symbol> --d N --conv N [--rationale -]
+janus score queue [--date D]
+janus score record <symbol> --factor key=value ... [--rationale -]
 janus score list [--date D]
 
 janus trade open <symbol> --direction DIR --price P --stop S --risk R --notional N
@@ -489,8 +574,10 @@ Insufficient bar history is not an error. It produces `NULL` indicators plus a
 Explicitly out of scope for the first implementation, and designed around rather than
 built:
 
-- **Advanced D/Conv generation.** The formula the agent uses to produce `d` and `conv`
-  is being worked out separately. Janus accepts them as inputs.
+- **Advanced D/Conv derivation.** The weighted-mean formula above is a placeholder. The
+  factor set itself is also expected to evolve past `catalyst`/`trend`/`secular`/
+  `crowding` — which the schema absorbs without migration, since factors are rows and
+  weights are cluster params.
 - **Advanced directive mapping.** The v1 table above is a placeholder confined to
   `domain/directive.ts`.
 - **Risk and position sizing.** Deciding notional, stop placement, and add/trim
