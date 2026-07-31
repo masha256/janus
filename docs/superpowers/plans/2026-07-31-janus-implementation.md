@@ -3156,7 +3156,13 @@ Register both in `src/cli.ts`:
   "cluster-read": () => import("./cli/cluster-read.ts"),
 ```
 
-Note: `cluster_read_at` is stamped only once every cluster has a read for the session. A system with no clusters stamps it on the first call, which is correct — there is nothing to read.
+Note: `cluster_read_at` is stamped only once every cluster has a read for the session.
+
+**A session with zero clusters is a special case.** `cluster-read record` requires a real cluster
+key, so with no clusters registered there is no call that can ever succeed, and the phase could
+never be stamped — a fresh install would be stuck behind `--force` every day. `regime record`
+therefore also stamps `cluster_read_at` when `listClusters(db)` is empty: a phase with nothing to
+read is vacuously complete. Once any cluster exists, the normal all-clusters-read rule applies.
 
 - [ ] **Step 6: Verify**
 
