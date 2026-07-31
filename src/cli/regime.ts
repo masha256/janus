@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import { openDb } from "../db/connect.ts";
 import { resolveSession, stampPhase } from "../db/repo/session.ts";
 import { recordRegime, getRegime } from "../db/repo/phase.ts";
+import { listClusters } from "../db/repo/cluster.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
 import { num, oneOf, readText, required, pairs } from "./args.ts";
 import { JanusError } from "../output.ts";
@@ -32,7 +33,19 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
         metrics: pairs(values.metric, "metric"),
       }, now);
       stampPhase(db, session.session_date, "regime", now);
-      return { session_date: session.session_date, ...(getRegime(db, session.session_date) as object) };
+      const stamped = ["regime"];
+      // A phase with nothing to read is vacuously complete. Without this, a
+      // session with no clusters could never stamp cluster_read_at, because
+      // cluster-read record requires a cluster key that does not exist.
+      if (listClusters(db).length === 0) {
+        stampPhase(db, session.session_date, "cluster_read", now);
+        stamped.push("cluster_read");
+      }
+      return {
+        session_date: session.session_date,
+        stamped,
+        ...(getRegime(db, session.session_date) as object),
+      };
     }
     if (verb === "show") {
       const session = resolveSession(db, values.date, nowIso());

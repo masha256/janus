@@ -31,7 +31,10 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
         now,
       );
       const reads = listClusterReads(db, session.session_date);
-      // The phase is complete only once every cluster has been read.
+      // The phase is complete only once every cluster has been read. This is a
+      // point-in-time check: the stamp is not invalidated by clusters added
+      // later in the session, so a cluster added after the stamp leaves the
+      // phase reported complete until someone records a read again. Accepted.
       if (reads.length >= listClusters(db).length) {
         stampPhase(db, session.session_date, "cluster_read", now);
       }
