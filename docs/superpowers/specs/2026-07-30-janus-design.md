@@ -32,6 +32,14 @@ reading news, socials, filings or on-chain context is the agent's, and Janus rec
 type-stripping, so `src/cli.ts` runs directly in development with no build step, and
 `node --run` for scripts.
 
+Verified 2026-07-31 on v24.18.1: `node:sqlite` opens, bundles SQLite 3.53.1, and enforces
+partial unique indexes; native type-stripping runs `.ts` directly. The alternative was
+rejected on evidence — better-sqlite3 v13 requires Node ≥22 and segfaults on 20.x, and
+v12 ships no Node-20 prebuild, so it falls back to a node-gyp source build.
+
+Pin the version with `.nvmrc` (`24.18.1`) and `"engines": {"node": ">=24"}` in
+`package.json`, so an older runtime fails with a clear message instead of a segfault.
+
 **Zero runtime dependencies.** `node:sqlite`, `node:util.parseArgs`, native `fetch`,
 `node:test`. Janus is invoked many times per agent session, so cold start matters and
 an install that cannot break matters more.
@@ -86,8 +94,17 @@ sufficient and stay debuggable.
 
 ## Sessions and phase order
 
-A `session` is keyed by `trade_date` (`YYYY-MM-DD`), anchored to the previous US market
-close. Each phase stamps its completion timestamp on the session row.
+A `session` is keyed by `session_date` (`YYYY-MM-DD`) — the **real calendar date the
+session is run on**, taken from the system clock. Each phase stamps its completion
+timestamp on the session row.
+
+Date anchoring is the agent's concern, not janus's. The agent performs its regime read
+against the previous US market close, but that anchor is an analytical frame, not a
+stored value: a read the agent performs today using yesterday's close is recorded under
+today's date. Janus never back-dates a session to match the anchor.
+
+`--date` exists to address an already-existing session (correcting or re-running a
+phase), not to record a session as though it happened on another day.
 
 ```
 regime        → 1 row per session
@@ -201,7 +218,7 @@ CREATE TABLE asset (
 );
 
 CREATE TABLE session (
-  trade_date       TEXT PRIMARY KEY,
+  session_date     TEXT PRIMARY KEY,
   opened_at        TEXT NOT NULL,
   regime_at        TEXT,
   cluster_read_at  TEXT,
@@ -211,32 +228,32 @@ CREATE TABLE session (
 );
 
 CREATE TABLE regime_read (
-  trade_date   TEXT PRIMARY KEY REFERENCES session(trade_date) ON DELETE CASCADE,
-  state        TEXT NOT NULL CHECK (state IN ('RISK_ON','NEUTRAL','RISK_OFF')),
-  score        REAL NOT NULL CHECK (score BETWEEN -2.0 AND 2.0),
-  summary      TEXT NOT NULL,
-  recorded_at  TEXT NOT NULL
+  session_date  TEXT PRIMARY KEY REFERENCES session(session_date) ON DELETE CASCADE,
+  state         TEXT NOT NULL CHECK (state IN ('RISK_ON','NEUTRAL','RISK_OFF')),
+  score         REAL NOT NULL CHECK (score BETWEEN -2.0 AND 2.0),
+  summary       TEXT NOT NULL,
+  recorded_at   TEXT NOT NULL
 );
 
 CREATE TABLE regime_metric (
-  trade_date  TEXT NOT NULL REFERENCES session(trade_date) ON DELETE CASCADE,
-  key         TEXT NOT NULL,
-  value_num   REAL,
-  value_text  TEXT,
-  PRIMARY KEY (trade_date, key)
+  session_date  TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
+  key           TEXT NOT NULL,
+  value_num     REAL,
+  value_text    TEXT,
+  PRIMARY KEY (session_date, key)
 );
 
 CREATE TABLE cluster_read (
-  trade_date   TEXT NOT NULL REFERENCES session(trade_date) ON DELETE CASCADE,
-  cluster_id   INTEGER NOT NULL REFERENCES cluster(id) ON DELETE CASCADE,
-  bias         REAL NOT NULL CHECK (bias BETWEEN -2.0 AND 2.0),
-  judgement    TEXT NOT NULL,
-  recorded_at  TEXT NOT NULL,
-  PRIMARY KEY (trade_date, cluster_id)
+  session_date  TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
+  cluster_id    INTEGER NOT NULL REFERENCES cluster(id) ON DELETE CASCADE,
+  bias          REAL NOT NULL CHECK (bias BETWEEN -2.0 AND 2.0),
+  judgement     TEXT NOT NULL,
+  recorded_at   TEXT NOT NULL,
+  PRIMARY KEY (session_date, cluster_id)
 );
 
 CREATE TABLE coverage (
-  trade_date       TEXT NOT NULL REFERENCES session(trade_date) ON DELETE CASCADE,
+  session_date     TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
   asset_id         INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
   open             REAL, high REAL, low REAL, close REAL NOT NULL, volume REAL,
   mark_price       REAL,
@@ -253,22 +270,22 @@ CREATE TABLE coverage (
   cross_px_50_age  INTEGER,
   bars_available   INTEGER NOT NULL,
   fetched_at       TEXT NOT NULL,
-  PRIMARY KEY (trade_date, asset_id)
+  PRIMARY KEY (session_date, asset_id)
 );
 
 CREATE TABLE screen (
-  trade_date   TEXT NOT NULL REFERENCES session(trade_date) ON DELETE CASCADE,
-  asset_id     INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
-  score        REAL NOT NULL,
-  threshold    REAL NOT NULL,        -- resolved value at time of decision
-  flagged      INTEGER NOT NULL,
-  rationale    TEXT,
-  recorded_at  TEXT NOT NULL,
-  PRIMARY KEY (trade_date, asset_id)
+  session_date  TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
+  asset_id      INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+  score         REAL NOT NULL,
+  threshold     REAL NOT NULL,        -- resolved value at time of decision
+  flagged       INTEGER NOT NULL,
+  rationale     TEXT,
+  recorded_at   TEXT NOT NULL,
+  PRIMARY KEY (session_date, asset_id)
 );
 
 CREATE TABLE score (
-  trade_date      TEXT NOT NULL REFERENCES session(trade_date) ON DELETE CASCADE,
+  session_date    TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
   asset_id        INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
   d               REAL NOT NULL CHECK (d BETWEEN -2.0 AND 2.0),
   conv            REAL NOT NULL CHECK (conv BETWEEN 1 AND 10),
@@ -277,22 +294,22 @@ CREATE TABLE score (
   params_json     TEXT NOT NULL,     -- resolved thresholds, snapshotted
   rationale       TEXT,
   recorded_at     TEXT NOT NULL,
-  PRIMARY KEY (trade_date, asset_id)
+  PRIMARY KEY (session_date, asset_id)
 );
 
 CREATE TABLE trade (
-  id                INTEGER PRIMARY KEY,
-  asset_id          INTEGER NOT NULL REFERENCES asset(id),
-  direction         TEXT NOT NULL CHECK (direction IN ('long','short')),
-  status            TEXT NOT NULL CHECK (status IN ('open','closed')),
-  opened_on         TEXT NOT NULL,
-  initial_price     REAL NOT NULL,
-  initial_stop      REAL NOT NULL,
-  initial_risk      REAL NOT NULL,
-  thesis            TEXT,
-  origin_trade_date TEXT,            -- score row that motivated the entry
-  closed_on         TEXT,
-  created_at        TEXT NOT NULL
+  id                  INTEGER PRIMARY KEY,
+  asset_id            INTEGER NOT NULL REFERENCES asset(id),
+  direction           TEXT NOT NULL CHECK (direction IN ('long','short')),
+  status              TEXT NOT NULL CHECK (status IN ('open','closed')),
+  opened_on           TEXT NOT NULL,
+  initial_price       REAL NOT NULL,
+  initial_stop        REAL NOT NULL,
+  initial_risk        REAL NOT NULL,
+  thesis              TEXT,
+  origin_session_date TEXT,            -- score row that motivated the entry
+  closed_on           TEXT,
+  created_at          TEXT NOT NULL
 );
 
 CREATE UNIQUE INDEX trade_one_open_per_asset
@@ -401,8 +418,10 @@ janus trade list [--open] [--closed] [--asset SYMBOL]
 janus trade show <trade_id>
 ```
 
-All phase-recording commands default to the current open session and accept `--date` to
-target a specific one.
+Phase commands default to the current open session; their `--date` addresses an
+existing session, per Sessions and phase order above. The `--date` on `trade open`,
+`add-unit` and `exit` is unrelated — it is the real entry or exit date of that unit, and
+defaults to today.
 
 ## Testing
 
@@ -447,5 +466,6 @@ built:
 
 ## Open items
 
-- `.gitignore` needs `node_modules`, `dist`, `janus.db`.
-- Node 24 must be installed before implementation begins (currently 20.18).
+- `.gitignore` needs `node_modules`, `dist`, `janus.db`. (Done 2026-07-31.)
+- Node 24.18.1 installed via nvm 2026-07-31, but nvm's `default` alias still points at
+  20.18.0. Either `nvm alias default 24` or rely on the project `.nvmrc`.
