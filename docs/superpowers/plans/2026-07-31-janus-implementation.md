@@ -3513,7 +3513,9 @@ import type { AssetRow } from "../db/repo/asset.ts";
 /** Narrow the eligible set to an explicit symbol list, rejecting the whole call on any miss. */
 function select(eligible: AssetRow[], symbols: string[] | undefined): AssetRow[] {
   if (symbols === undefined) return eligible;
-  const wanted = symbols.map((s) => s.toUpperCase());
+  // Dedup: --asset BTC,BTC would otherwise fetch twice and report covered: 2
+  // while the upsert collapses both into a single row.
+  const wanted = [...new Set(symbols.map((s) => s.toUpperCase()))];
   const bySymbol = new Map(eligible.map((a) => [a.symbol, a]));
   const missing = wanted.filter((s) => !bySymbol.has(s));
   if (missing.length > 0) {
