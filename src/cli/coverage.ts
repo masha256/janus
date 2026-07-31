@@ -13,7 +13,9 @@ import type { AssetRow } from "../db/repo/asset.ts";
 /** Narrow the eligible set to an explicit symbol list, rejecting the whole call on any miss. */
 function select(eligible: AssetRow[], symbols: string[] | undefined): AssetRow[] {
   if (symbols === undefined) return eligible;
-  const wanted = symbols.map((s) => s.toUpperCase());
+  // Dedup: --asset BTC,BTC would otherwise fetch twice and report covered: 2
+  // while the upsert collapses both into a single row.
+  const wanted = [...new Set(symbols.map((s) => s.toUpperCase()))];
   const bySymbol = new Map(eligible.map((a) => [a.symbol, a]));
   const missing = wanted.filter((s) => !bySymbol.has(s));
   if (missing.length > 0) {
@@ -43,7 +45,9 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
 
       const eligible = eligibleAssets(db);
       const targets = select(eligible, symbols);
-      const client = createLighterClient();
+      // createLighterClient already takes a baseUrl; JANUS_LIGHTER_URL lets tests
+      // (and any future replay tooling) point it at a stub instead of the real API.
+      const client = createLighterClient(process.env["JANUS_LIGHTER_URL"]);
 
       const rows: { asset_id: number; values: ReturnType<typeof computeCoverage> }[] = [];
       const skipped: { symbol: string; reason: string }[] = [];
