@@ -95,16 +95,31 @@ sufficient and stay debuggable.
 ## Sessions and phase order
 
 A `session` is keyed by `session_date` (`YYYY-MM-DD`) — the **real calendar date the
-session is run on**, taken from the system clock. Each phase stamps its completion
-timestamp on the session row.
+session is run on**. Each phase stamps its completion timestamp on the session row.
 
 Date anchoring is the agent's concern, not janus's. The agent performs its regime read
 against the previous US market close, but that anchor is an analytical frame, not a
 stored value: a read the agent performs today using yesterday's close is recorded under
 today's date. Janus never back-dates a session to match the anchor.
 
-`--date` exists to address an already-existing session (correcting or re-running a
-phase), not to record a session as though it happened on another day.
+**"Today" resolves in `America/New_York`, not system local time.** This puts the day
+boundary where the close anchor already is, so a session worked past local midnight from
+another timezone stays one session instead of splitting across two rows. Implemented as
+`Intl.DateTimeFormat("en-CA", {timeZone: "America/New_York"})`, which emits `YYYY-MM-DD`
+directly — no dependency, no hand-rolled offset arithmetic, DST handled.
+
+**There is no `session open` command.** The first phase command of the day creates the
+session implicitly, in the same transaction that writes its own data. A separate open
+step would be pure bookkeeping — its only outputs are the date, which comes from the
+clock, and `opened_at`, which duplicates the first phase's `recorded_at` — and
+forgetting it would fail an otherwise valid call for no diagnostic benefit.
+
+`janus session status` reports where the pipeline stands: which phases are complete,
+what runs next, and how many assets are eligible for it. That is the question an agent
+resuming mid-pipeline actually needs answered.
+
+`--date` addresses an already-existing session, for correcting or re-running a phase. It
+never creates one, and never records a session as though it happened on another day.
 
 ```
 regime        → 1 row per session
@@ -141,6 +156,9 @@ Error codes: `NOT_FOUND`, `ALREADY_EXISTS`, `VALIDATION`, `PHASE_ORDER`,
 `SESSION_MISSING`, `NO_COVERAGE`, `NOT_FLAGGED`, `POSITION_CONFLICT`, `UPSTREAM`
 (Lighter API failure), `INSUFFICIENT_HISTORY`.
 
+`SESSION_MISSING` is raised only when an explicit `--date` names a session that does not
+exist. Without `--date`, the session is created on demand and the code cannot occur.
+
 ## Module layout
 
 ```
@@ -161,7 +179,7 @@ src/
     directive.ts      (d, conv, positionState, params) => Directive   [pure]
     sizing.ts         position sizing                                 [deferred]
     trade-math.ts     avg entry, aggregate risk, R-multiple           [pure]
-    session.ts        phase order state machine
+    session.ts        phase order state machine, NY-anchored date resolution
   db/
     connect.ts
     migrate.ts        ordered array of DDL statements
@@ -397,13 +415,13 @@ janus asset activate <symbol>
 janus asset deactivate <symbol>
 janus asset rm <symbol>
 
-janus session open [--date YYYY-MM-DD]
 janus session status [--date YYYY-MM-DD]
+janus session list [--limit N]
 
 janus regime record --state STATE --score N --summary - [--metric key=value ...]
 janus cluster-read record <cluster> --bias N --judgement -
-janus coverage run [--asset SYMBOL]
-janus coverage list [--date D]
+janus coverage run [--asset SYM[,SYM...]] [--force]
+janus coverage list [--date D] [--asset SYM[,SYM...]]
 janus screen record <symbol> --score N [--rationale -]
 janus screen list [--flagged] [--date D]
 janus score record <symbol> --d N --conv N [--rationale -]
@@ -414,14 +432,25 @@ janus trade open <symbol> --direction DIR --price P --stop S --risk R --notional
 janus trade add-unit <trade_id> --price P --stop S --risk R --notional N [--date D]
 janus trade set-stop <trade_id> --stop S [--unit SEQ]
 janus trade exit <trade_id> --price P [--unit SEQ] [--date D]
-janus trade list [--open] [--closed] [--asset SYMBOL]
+janus trade list [--open] [--closed] [--asset SYM[,SYM...]]
 janus trade show <trade_id>
 ```
 
-Phase commands default to the current open session; their `--date` addresses an
-existing session, per Sessions and phase order above. The `--date` on `trade open`,
-`add-unit` and `exit` is unrelated — it is the real entry or exit date of that unit, and
-defaults to today.
+Phase commands default to the current session; their `--date` addresses an existing
+session, per Sessions and phase order above. The `--date` on `trade open`, `add-unit`
+and `exit` is unrelated — it is the real entry or exit date of that unit, and defaults
+to today.
+
+**`--asset` accepts a comma-separated list** wherever it appears: `--asset BTC,ETH,SOL`.
+Omitting it means *all eligible assets*, which is the normal daily path — `janus
+coverage run` with no flags fetches every roster asset where
+`asset.active = 1 AND market.status = 'active'`. The flag exists for retrying a subset
+after a partial upstream failure, or for pulling a single asset while debugging.
+
+A symbol in the list that is unknown, deactivated, or delisted on Lighter fails the
+whole call with `VALIDATION` naming the offending symbols, rather than silently covering
+the remainder. Ambiguity about which assets were actually processed is worse for an
+agent than an outright error.
 
 ## Testing
 
@@ -443,6 +472,11 @@ defaults to today.
 Lighter API failures surface as `UPSTREAM` with the HTTP status and endpoint, and never
 leave a partial coverage slice — the coverage phase writes all rows in a single
 transaction, or none.
+
+Only a full `coverage run` (no `--asset`) that covers every eligible asset stamps
+`session.coverage_at`. A subset run writes its rows but leaves the phase incomplete, so
+a partial retry cannot accidentally unblock screening on assets that were never
+covered.
 
 Validation happens at the CLI boundary: ranges on `d` and `conv`, enum membership,
 symbol existence in the roster, `active` status. Errors name the offending flag.
