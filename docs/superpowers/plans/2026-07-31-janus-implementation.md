@@ -713,6 +713,13 @@ test("sma returns null when history is shorter than the period", () => {
   assert.equal(sma([], 1), null);
 });
 
+test("a non-positive period yields nulls, never NaN", () => {
+  assert.deepEqual(smaSeries([1, 2, 3], 0), [null, null, null]);
+  assert.deepEqual(smaSeries([1, 2, 3], -1), [null, null, null]);
+  assert.equal(sma([1, 2, 3], 0), null);
+  assert.equal(ema([1, 2, 3], 0), null);
+});
+
 test("smaSeries is null-padded and aligned to the input", () => {
   assert.deepEqual(smaSeries([1, 2, 3, 4], 2), [null, 1.5, 2.5, 3.5]);
 });
@@ -770,6 +777,9 @@ Create `src/indicators/ma.ts`:
 ```ts
 export function smaSeries(values: number[], period: number): (number | null)[] {
   const out: (number | null)[] = [];
+  // Without this guard a period <= 0 makes values[i - period] read past the end,
+  // and the non-null assertion below turns that undefined into silent NaN.
+  if (period < 1) return new Array(values.length).fill(null);
   let sum = 0;
   for (let i = 0; i < values.length; i++) {
     sum += values[i]!;
