@@ -9,7 +9,7 @@ export function readText(value: string | undefined): string | undefined {
 }
 
 export function required(value: string | undefined, flag: string): string {
-  if (value === undefined || value === "") {
+  if (value === undefined || value.trim() === "") {
     throw new JanusError("VALIDATION", `missing required flag --${flag}`);
   }
   return value;

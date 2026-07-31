@@ -7,7 +7,7 @@
   "engines": { "node": ">=24" },
   "scripts": {
     "build": "tsc -p .",
-    "test": "node --test",
+    "test": "node --test 'src/**/*.test.ts'",
     "janus": "node src/cli.ts"
   },
   "license": "ISC",
