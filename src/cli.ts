@@ -8,6 +8,8 @@ const NOUNS: Record<string, () => Promise<{ handle: Handler }>> = {
   cluster: () => import("./cli/cluster.ts"),
   asset: () => import("./cli/asset.ts"),
   session: () => import("./cli/session.ts"),
+  regime: () => import("./cli/regime.ts"),
+  "cluster-read": () => import("./cli/cluster-read.ts"),
 };
 
 async function main(): Promise<void> {
