@@ -13,6 +13,8 @@
 ## Global Constraints
 
 - **Node `>=24`.** `.nvmrc` pins `24.18.1`; `package.json` declares `"engines": {"node": ">=24"}`.
+- **Always invoke Node through pnpm** — `pnpm exec node …`, `pnpm test`, `pnpm build`. The machine's bare `node` is v20.18.0 and will fail on `node:sqlite` and on `.ts` execution. `.npmrc` sets `use-node-version=24.18.1`, so anything pnpm runs gets v24 regardless of the caller's shell. A bare `node` command in a verification step is a bug in that step.
+- **pnpm is the package manager.** Commit `pnpm-lock.yaml`; never create `package-lock.json`.
 - **Zero runtime dependencies.** `dependencies` in `package.json` stays empty. `@types/node` and `typescript` are `devDependencies` only. Never add a package to solve what stdlib covers.
 - **`"type": "module"`** in `package.json`. All imports are ESM.
 - **Relative imports use the `.ts` extension** (`import { sma } from "./ma.ts"`). `rewriteRelativeImportExtensions` converts them to `.js` on build. Verified working.
@@ -21,7 +23,7 @@
 - **All money values (`notional`, `risk`, `initial_risk`) are USD.** All price values (`stop`, `entry_price`, `initial_price`) are in the market's own units.
 - **Scales:** `d` and all factors and scores are `-2.0..+2.0`. `conv` is `1..10`. `confidence` is `0.0..2.0` (a ± margin, never negative).
 - **Dates are `YYYY-MM-DD` strings resolved in `America/New_York`.** Timestamps are ISO-8601 UTC strings.
-- **Run tests with `node --test`** from the project root. It auto-discovers `*.test.ts`.
+- **Run tests with `pnpm exec node --test`** from the project root. It auto-discovers `*.test.ts`.
 
 ## File Structure
 
@@ -63,7 +65,13 @@
 
 ```bash
 echo "24.18.1" > .nvmrc
+printf 'use-node-version=24.18.1\nengine-strict=true\n' > .npmrc
 ```
+
+`use-node-version` makes pnpm fetch and run v24 for every script and `pnpm exec`,
+independent of the shell's nvm default (which is v20 on this machine).
+`engine-strict` turns the `engines` field into a hard failure rather than a warning.
+Verified working: `pnpm exec node -v` prints `v24.18.1` while bare `node -v` prints `v20.18.0`.
 
 Replace `package.json` with:
 
@@ -118,7 +126,7 @@ Then move the Anthropic SDK out of runtime dependencies — it is scratch code, 
 
 ```bash
 rm -rf tmp
-npm install
+pnpm install
 ```
 
 - [ ] **Step 2: Write the failing test**
@@ -152,7 +160,7 @@ test("envelope renders an unknown error as VALIDATION-free INTERNAL", () => {
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `node --test src/output.test.ts`
+Run: `pnpm exec node --test src/output.test.ts`
 Expected: FAIL — cannot find module `./output.ts`.
 
 - [ ] **Step 4: Write the implementation**
@@ -208,7 +216,7 @@ export function fail(err: unknown): void {
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `node --test src/output.test.ts`
+Run: `pnpm exec node --test src/output.test.ts`
 Expected: PASS, 3 tests.
 
 - [ ] **Step 6: Write the argument helpers**
@@ -314,14 +322,14 @@ main().catch(fail);
 
 - [ ] **Step 8: Verify the router and build**
 
-Run: `node src/cli.ts` — expect `{"ok":false,"error":{"code":"VALIDATION","message":"usage: janus <noun> <verb> [flags]; nouns: "}}` and exit code 1 (`echo $?` → 1).
-Run: `npm run build` — expect no output and a populated `dist/`.
-Run: `node --test` — expect PASS.
+Run: `pnpm exec node src/cli.ts` — expect `{"ok":false,"error":{"code":"VALIDATION","message":"usage: janus <noun> <verb> [flags]; nouns: "}}` and exit code 1 (`echo $?` → 1).
+Run: `pnpm build` — expect no output and a populated `dist/`.
+Run: `pnpm exec node --test` — expect PASS.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add .nvmrc package.json package-lock.json tsconfig.json src/
+git add .nvmrc .npmrc package.json pnpm-lock.yaml tsconfig.json src/
 git commit -m "feat: project scaffolding, JSON envelope, CLI router"
 ```
 
@@ -401,7 +409,7 @@ test("foreign keys cascade from session to its phase rows", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/db/migrate.test.ts`
+Run: `pnpm exec node --test src/db/migrate.test.ts`
 Expected: FAIL — cannot find module `./connect.ts`.
 
 - [ ] **Step 3: Write the connection module**
@@ -624,7 +632,7 @@ Note: `PRAGMA user_version` cannot be parameterised, hence the template literal.
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `node --test src/db/migrate.test.ts`
+Run: `pnpm exec node --test src/db/migrate.test.ts`
 Expected: PASS, 3 tests.
 
 - [ ] **Step 6: Add the `init` command**
@@ -653,7 +661,7 @@ In `src/cli.ts`, add to `NOUNS`:
 - [ ] **Step 7: Verify end to end**
 
 ```bash
-JANUS_DB=/tmp/janus-check.db node src/cli.ts init
+JANUS_DB=/tmp/janus-check.db pnpm exec node src/cli.ts init
 ```
 
 Expected: `{"ok":true,"data":{"database":"/tmp/janus-check.db","schema_version":1}}`. Run it twice — the second run returns the same version. Then `rm /tmp/janus-check.db*`.
@@ -749,7 +757,7 @@ test("atr returns null when there are fewer bars than the period", () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `node --test src/indicators/`
+Run: `pnpm exec node --test src/indicators/`
 Expected: FAIL — cannot find modules `./ma.ts` and `./atr.ts`.
 
 - [ ] **Step 3: Implement the moving averages**
@@ -812,7 +820,7 @@ export function atr(bars: Bar[], period: number): number | null {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `node --test src/indicators/`
+Run: `pnpm exec node --test src/indicators/`
 Expected: PASS, 9 tests.
 
 - [ ] **Step 6: Commit**
@@ -883,7 +891,7 @@ test("priceVsMa returns nulls when the ma is entirely null", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/indicators/cross.test.ts`
+Run: `pnpm exec node --test src/indicators/cross.test.ts`
 Expected: FAIL — cannot find module `./cross.ts`.
 
 - [ ] **Step 3: Write the implementation**
@@ -941,7 +949,7 @@ export function priceVsMa(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test src/indicators/cross.test.ts`
+Run: `pnpm exec node --test src/indicators/cross.test.ts`
 Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Commit**
@@ -1007,7 +1015,7 @@ test("resolveParams does not mutate its inputs", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/domain/params.test.ts`
+Run: `pnpm exec node --test src/domain/params.test.ts`
 Expected: FAIL — cannot find module `./params.ts`.
 
 - [ ] **Step 3: Write the implementation**
@@ -1044,7 +1052,7 @@ export function resolveParams(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test src/domain/params.test.ts`
+Run: `pnpm exec node --test src/domain/params.test.ts`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 5: Commit**
@@ -1130,7 +1138,7 @@ test("deriveScore rejects an out-of-range factor", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/domain/score.test.ts`
+Run: `pnpm exec node --test src/domain/score.test.ts`
 Expected: FAIL — cannot find module `./score.ts`.
 
 - [ ] **Step 3: Write the implementation**
@@ -1179,7 +1187,7 @@ export function deriveScore(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test src/domain/score.test.ts`
+Run: `pnpm exec node --test src/domain/score.test.ts`
 Expected: PASS, 6 tests. If the worked-examples table fails, the formula is wrong — not the table. The table is verified against the spec.
 
 - [ ] **Step 5: Commit**
@@ -1266,7 +1274,7 @@ test("formatPosition renders side and unit count", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/domain/directive.test.ts`
+Run: `pnpm exec node --test src/domain/directive.test.ts`
 Expected: FAIL — cannot find module `./directive.ts`.
 
 - [ ] **Step 3: Write the implementation**
@@ -1307,7 +1315,7 @@ export function deriveDirective(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test src/domain/directive.test.ts`
+Run: `pnpm exec node --test src/domain/directive.test.ts`
 Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Commit**
@@ -1405,7 +1413,7 @@ test("PHASES is the documented pipeline order", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/domain/session.test.ts`
+Run: `pnpm exec node --test src/domain/session.test.ts`
 Expected: FAIL — cannot find module `./session.ts`.
 
 - [ ] **Step 3: Write the implementation**
@@ -1472,7 +1480,7 @@ export function assertPhaseOrder(session: SessionRow, phase: Phase, force: boole
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test src/domain/session.test.ts`
+Run: `pnpm exec node --test src/domain/session.test.ts`
 Expected: PASS, 9 tests.
 
 - [ ] **Step 5: Commit**
@@ -1575,7 +1583,7 @@ test("an empty unit list is neutral, not a divide by zero", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/domain/trade-math.test.ts`
+Run: `pnpm exec node --test src/domain/trade-math.test.ts`
 Expected: FAIL — cannot find module `./trade-math.ts`.
 
 - [ ] **Step 3: Write the implementation**
@@ -1640,7 +1648,7 @@ export function tradeSummary(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test src/domain/trade-math.test.ts`
+Run: `pnpm exec node --test src/domain/trade-math.test.ts`
 Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Commit**
@@ -1773,7 +1781,7 @@ test("a non-200 response becomes an UPSTREAM error naming the endpoint", async (
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `node --test src/lighter/client.test.ts`
+Run: `pnpm exec node --test src/lighter/client.test.ts`
 Expected: FAIL — cannot find module `./client.ts`.
 
 - [ ] **Step 4: Write the implementation**
@@ -1924,7 +1932,7 @@ export function createLighterClient(
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `node --test src/lighter/client.test.ts`
+Run: `pnpm exec node --test src/lighter/client.test.ts`
 Expected: PASS, 6 tests. No network is used — the two async tests inject a fake `fetch`.
 
 - [ ] **Step 6: Commit**
@@ -2094,7 +2102,7 @@ test("listAssets filters by active, class, and cluster", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/db/repo/roster.test.ts`
+Run: `pnpm exec node --test src/db/repo/roster.test.ts`
 Expected: FAIL — cannot find module `./market.ts`.
 
 - [ ] **Step 3: Write the market repo**
@@ -2393,7 +2401,7 @@ export function eligibleAssets(db: DatabaseSync): AssetRow[] {
 
 - [ ] **Step 6: Run test to verify it passes**
 
-Run: `node --test src/db/repo/roster.test.ts`
+Run: `pnpm exec node --test src/db/repo/roster.test.ts`
 Expected: PASS, 11 tests.
 
 - [ ] **Step 7: Commit the repos**
@@ -2592,18 +2600,18 @@ Note: `--cluster ""` on `asset set` detaches the asset — `updateAsset` maps an
 
 ```bash
 export JANUS_DB=/tmp/janus-roster.db
-node src/cli.ts init
-node src/cli.ts market sync                       # expect {"ok":true,"data":{"synced":228,...}}
-node src/cli.ts market list --search BTC
-node src/cli.ts cluster add majors --name "Majors"
-node src/cli.ts cluster set-param majors conv_add 8
-node src/cli.ts asset add BTC --class crypto --cluster majors
-node src/cli.ts asset add SPY --class etf
-node src/cli.ts asset list --active
-node src/cli.ts cluster show majors                # resolved params show conv_add: 8
-node src/cli.ts asset deactivate SPY
-node src/cli.ts asset list --inactive
-node src/cli.ts asset add NOSUCHTHING --class crypto   # expect NOT_FOUND, exit 1
+pnpm exec node src/cli.ts init
+pnpm exec node src/cli.ts market sync                       # expect {"ok":true,"data":{"synced":228,...}}
+pnpm exec node src/cli.ts market list --search BTC
+pnpm exec node src/cli.ts cluster add majors --name "Majors"
+pnpm exec node src/cli.ts cluster set-param majors conv_add 8
+pnpm exec node src/cli.ts asset add BTC --class crypto --cluster majors
+pnpm exec node src/cli.ts asset add SPY --class etf
+pnpm exec node src/cli.ts asset list --active
+pnpm exec node src/cli.ts cluster show majors                # resolved params show conv_add: 8
+pnpm exec node src/cli.ts asset deactivate SPY
+pnpm exec node src/cli.ts asset list --inactive
+pnpm exec node src/cli.ts asset add NOSUCHTHING --class crypto   # expect NOT_FOUND, exit 1
 rm -f /tmp/janus-roster.db*; unset JANUS_DB
 ```
 
@@ -2712,7 +2720,7 @@ test("listSessions returns newest first and honours the limit", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/db/repo/session.test.ts`
+Run: `pnpm exec node --test src/db/repo/session.test.ts`
 Expected: FAIL — cannot find module `./session.ts`.
 
 - [ ] **Step 3: Write the implementation**
@@ -2767,7 +2775,7 @@ export function stampPhase(db: DatabaseSync, date: string, phase: Phase, at: str
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test src/db/repo/session.test.ts`
+Run: `pnpm exec node --test src/db/repo/session.test.ts`
 Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Write the session command**
@@ -2830,9 +2838,9 @@ Register in `src/cli.ts`: `session: () => import("./cli/session.ts"),`
 
 ```bash
 export JANUS_DB=/tmp/janus-session.db
-node src/cli.ts init
-node src/cli.ts session status      # exists:false, next_phase:"regime"
-node src/cli.ts session list        # empty
+pnpm exec node src/cli.ts init
+pnpm exec node src/cli.ts session status      # exists:false, next_phase:"regime"
+pnpm exec node src/cli.ts session list        # empty
 rm -f /tmp/janus-session.db*; unset JANUS_DB
 ```
 
@@ -2923,7 +2931,7 @@ test("recordClusterRead is keyed per cluster and overwrites on re-run", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/db/repo/phase.test.ts`
+Run: `pnpm exec node --test src/db/repo/phase.test.ts`
 Expected: FAIL — cannot find module `./phase.ts`.
 
 - [ ] **Step 3: Write the implementation**
@@ -3008,7 +3016,7 @@ export function listClusterReads(db: DatabaseSync, date: string): unknown[] {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test src/db/repo/phase.test.ts`
+Run: `pnpm exec node --test src/db/repo/phase.test.ts`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 5: Write the command modules**
@@ -3135,15 +3143,15 @@ Note: `cluster_read_at` is stamped only once every cluster has a read for the se
 
 ```bash
 export JANUS_DB=/tmp/janus-phase.db
-node src/cli.ts init && node src/cli.ts market sync
-node src/cli.ts cluster add majors --name "Majors"
-node src/cli.ts asset add BTC --class crypto --cluster majors
-echo "breadth improving, credit calm" | node src/cli.ts regime record \
+pnpm exec node src/cli.ts init && pnpm exec node src/cli.ts market sync
+pnpm exec node src/cli.ts cluster add majors --name "Majors"
+pnpm exec node src/cli.ts asset add BTC --class crypto --cluster majors
+echo "breadth improving, credit calm" | pnpm exec node src/cli.ts regime record \
   --state RISK_ON --score 1.5 --confidence 0.5 --summary - --metric vix=14.2 --metric dxy=99.1
-node src/cli.ts session status                     # regime_at set, next_phase cluster_read
-node src/cli.ts cluster-read record majors --bias 1.0 --judgement "leadership intact"
-node src/cli.ts session status                     # cluster_read_at set, next_phase coverage
-node src/cli.ts regime record --state RISK_ON --score 1.5 --confidence 3 --summary x  # VALIDATION
+pnpm exec node src/cli.ts session status                     # regime_at set, next_phase cluster_read
+pnpm exec node src/cli.ts cluster-read record majors --bias 1.0 --judgement "leadership intact"
+pnpm exec node src/cli.ts session status                     # cluster_read_at set, next_phase coverage
+pnpm exec node src/cli.ts regime record --state RISK_ON --score 1.5 --confidence 3 --summary x  # VALIDATION
 rm -f /tmp/janus-phase.db*; unset JANUS_DB
 ```
 
@@ -3247,7 +3255,7 @@ test("an empty bar list is rejected rather than written as a hole", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/domain/coverage.test.ts`
+Run: `pnpm exec node --test src/domain/coverage.test.ts`
 Expected: FAIL — cannot find module `./coverage.ts`.
 
 - [ ] **Step 3: Write the pure computation**
@@ -3322,7 +3330,7 @@ export function computeCoverage(bars: Bar[], snapshot: Snapshot, fetchedAt: stri
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test src/domain/coverage.test.ts`
+Run: `pnpm exec node --test src/domain/coverage.test.ts`
 Expected: PASS, 6 tests.
 
 - [ ] **Step 5: Write the coverage repo and its test**
@@ -3457,7 +3465,7 @@ test("a failed row rolls the whole batch back", () => {
 
 - [ ] **Step 6: Run the repo test**
 
-Run: `node --test src/db/repo/coverage.test.ts`
+Run: `pnpm exec node --test src/db/repo/coverage.test.ts`
 Expected: PASS, 3 tests.
 
 - [ ] **Step 7: Write the coverage command**
@@ -3564,18 +3572,18 @@ Register in `src/cli.ts`: `coverage: () => import("./cli/coverage.ts"),`
 
 ```bash
 export JANUS_DB=/tmp/janus-cov.db
-node src/cli.ts init && node src/cli.ts market sync
-node src/cli.ts asset add BTC --class crypto
-node src/cli.ts asset add SPY --class etf
-node src/cli.ts regime record --state NEUTRAL --score 0 --confidence 0.5 --summary "flat"
-node src/cli.ts coverage run
+pnpm exec node src/cli.ts init && pnpm exec node src/cli.ts market sync
+pnpm exec node src/cli.ts asset add BTC --class crypto
+pnpm exec node src/cli.ts asset add SPY --class etf
+pnpm exec node src/cli.ts regime record --state NEUTRAL --score 0 --confidence 0.5 --summary "flat"
+pnpm exec node src/cli.ts coverage run
 ```
 
 Expect `covered: 2`, `phase_complete: true`. Then:
 
 ```bash
-node src/cli.ts coverage list --asset BTC     # sma200 populated, cross_50_200 set
-node src/cli.ts coverage run --asset NOSUCH   # VALIDATION naming NOSUCH, exit 1
+pnpm exec node src/cli.ts coverage list --asset BTC     # sma200 populated, cross_50_200 set
+pnpm exec node src/cli.ts coverage run --asset NOSUCH   # VALIDATION naming NOSUCH, exit 1
 rm -f /tmp/janus-cov.db*; unset JANUS_DB
 ```
 
@@ -3669,7 +3677,7 @@ test("listScreen can return only the flagged rows", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/db/repo/screen.test.ts`
+Run: `pnpm exec node --test src/db/repo/screen.test.ts`
 Expected: FAIL — cannot find module `./screen.ts`.
 
 - [ ] **Step 3: Write the implementation**
@@ -3729,7 +3737,7 @@ export function countScreened(db: DatabaseSync, date: string): number {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test src/db/repo/screen.test.ts`
+Run: `pnpm exec node --test src/db/repo/screen.test.ts`
 Expected: PASS, 3 tests.
 
 - [ ] **Step 5: Write the screen command**
@@ -3950,7 +3958,7 @@ test("re-scoring replaces the previous factors rather than merging them", () => 
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/db/repo/score.test.ts`
+Run: `pnpm exec node --test src/db/repo/score.test.ts`
 Expected: FAIL — cannot find module `./score.ts`.
 
 - [ ] **Step 3: Write the implementation**
@@ -4071,7 +4079,7 @@ export function listScores(db: DatabaseSync, date: string): unknown[] {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test src/db/repo/score.test.ts`
+Run: `pnpm exec node --test src/db/repo/score.test.ts`
 Expected: PASS, 5 tests.
 
 - [ ] **Step 5: Write the score command**
@@ -4360,7 +4368,7 @@ test("listTrades filters by status and symbol", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test src/db/repo/trade.test.ts`
+Run: `pnpm exec node --test src/db/repo/trade.test.ts`
 Expected: FAIL — cannot find module `./trade.ts`.
 
 - [ ] **Step 3: Write the implementation**
@@ -4551,7 +4559,7 @@ export function listTrades(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test src/db/repo/trade.test.ts`
+Run: `pnpm exec node --test src/db/repo/trade.test.ts`
 Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Write the trade command**
@@ -4860,18 +4868,18 @@ Add a line to the spec's Data source section noting that `JANUS_LIGHTER_URL` ove
 
 - [ ] **Step 3: Run the test**
 
-Run: `node --test src/cli.e2e.test.ts`
+Run: `pnpm exec node --test src/cli.e2e.test.ts`
 Expected: PASS, 5 tests. If `coverage run` reports `covered: 0`, the stub server is not matching the request path — check that `orderBooks` fixture contains a `BTC` entry with `market_id` 1.
 
 - [ ] **Step 4: Run the whole suite and build**
 
-Run: `node --test`
+Run: `pnpm exec node --test`
 Expected: PASS, every test across all files.
 
-Run: `npm run build`
+Run: `pnpm build`
 Expected: clean compile into `dist/`.
 
-Run: `node dist/cli.js --help`
+Run: `pnpm exec node dist/cli.js --help`
 Expected: the usage envelope with every registered noun, exit code 1.
 
 - [ ] **Step 5: Commit**
@@ -4887,9 +4895,9 @@ git commit -m "test: end-to-end cli contract against a stub lighter server"
 
 Before declaring the implementation done, confirm each of these by running the command and reading the output — not by assuming:
 
-- [ ] `node --test` passes with zero failures.
-- [ ] `npm run build` compiles cleanly.
-- [ ] `node dist/cli.js init` works from a clean directory.
+- [ ] `pnpm exec node --test` passes with zero failures.
+- [ ] `pnpm build` compiles cleanly.
+- [ ] `pnpm exec node dist/cli.js init` works from a clean directory.
 - [ ] `git status` is clean and `janus.db` is not tracked.
 - [ ] Every command in the spec's CLI surface section exists and returns an envelope.
 - [ ] The spec's directive table and score worked-examples table are both covered by passing tests.
