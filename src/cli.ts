@@ -2,7 +2,9 @@ import { emit, fail, JanusError } from "./output.ts";
 
 type Handler = (verb: string | undefined, argv: string[]) => Promise<unknown>;
 
-const NOUNS: Record<string, () => Promise<{ handle: Handler }>> = {};
+const NOUNS: Record<string, () => Promise<{ handle: Handler }>> = {
+  init: () => import("./cli/init.ts"),
+};
 
 async function main(): Promise<void> {
   const [noun, verb, ...rest] = process.argv.slice(2);
