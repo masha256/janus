@@ -173,6 +173,12 @@ Error codes: `NOT_FOUND`, `ALREADY_EXISTS`, `VALIDATION`, `PHASE_ORDER`,
 `SESSION_MISSING` is raised only when an explicit `--date` names a session that does not
 exist. Without `--date`, the session is created on demand and the code cannot occur.
 
+**Confidence is a ± margin of error, on a 0.0..2.0 magnitude scale** — it is never
+negative. `regime record --score 1.5 --confidence 0.5` asserts a reading of 1.5 that the
+agent would defend anywhere in 1.0..2.0. A confidence of 0 is a point estimate; 2.0 on a
+-2..+2 score is an admission that the reading carries no information. The same applies
+to `screen record`.
+
 ## Module layout
 
 ```
@@ -264,7 +270,7 @@ CREATE TABLE regime_read (
   session_date  TEXT PRIMARY KEY REFERENCES session(session_date) ON DELETE CASCADE,
   state         TEXT NOT NULL CHECK (state IN ('RISK_ON','NEUTRAL','RISK_OFF')),
   score         REAL NOT NULL CHECK (score BETWEEN -2.0 AND 2.0),
-  confidence    REAL NOT NULL CHECK (confidence BETWEEN -2.0 AND 2.0),
+  confidence    REAL NOT NULL CHECK (confidence BETWEEN 0.0 AND 2.0),
   summary       TEXT NOT NULL,
   recorded_at   TEXT NOT NULL
 );
@@ -311,7 +317,7 @@ CREATE TABLE screen (
   session_date  TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
   asset_id      INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
   score         REAL NOT NULL CHECK (score BETWEEN -2.0 AND 2.0),
-  confidence    REAL NOT NULL CHECK (confidence BETWEEN -2.0 AND 2.0),
+  confidence    REAL NOT NULL CHECK (confidence BETWEEN 0.0 AND 2.0),
   threshold     REAL NOT NULL,        -- resolved value at time of decision
   flagged       INTEGER NOT NULL,
   rationale     TEXT,
