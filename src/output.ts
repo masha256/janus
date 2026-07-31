@@ -28,6 +28,10 @@ export function envelope(value: unknown): Envelope {
     return { ok: false, error: { code: value.code, message: value.message } };
   }
   if (value instanceof Error) {
+    const code = (value as Error & { code?: string }).code;
+    if (typeof code === "string" && code.startsWith("ERR_PARSE_ARGS_")) {
+      return { ok: false, error: { code: "VALIDATION", message: value.message } };
+    }
     return { ok: false, error: { code: "INTERNAL", message: value.message } };
   }
   return { ok: true, data: value };
