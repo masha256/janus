@@ -4,6 +4,9 @@ type Handler = (verb: string | undefined, argv: string[]) => Promise<unknown>;
 
 const NOUNS: Record<string, () => Promise<{ handle: Handler }>> = {
   init: () => import("./cli/init.ts"),
+  market: () => import("./cli/market.ts"),
+  cluster: () => import("./cli/cluster.ts"),
+  asset: () => import("./cli/asset.ts"),
 };
 
 async function main(): Promise<void> {
