@@ -23,7 +23,10 @@
 - **All money values (`notional`, `risk`, `initial_risk`) are USD.** All price values (`stop`, `entry_price`, `initial_price`) are in the market's own units.
 - **Scales:** `d` and all factors and scores are `-2.0..+2.0`. `conv` is `1..10`. `confidence` is `0.0..2.0` (a ± margin, never negative).
 - **Dates are `YYYY-MM-DD` strings resolved in `America/New_York`.** Timestamps are ISO-8601 UTC strings.
-- **Run tests with `pnpm exec node --test`** from the project root. It auto-discovers `*.test.ts`.
+- **Run tests with `pnpm test`** from the project root. The script is
+  `node --test 'src/**/*.test.ts'` — the glob is required, not cosmetic: a bare `node --test`
+  also discovers the compiled `dist/**/*.test.js`, so every test runs twice and a stale `dist/`
+  can mask a regression. `pnpm exec node --test <file>` is still correct for a single file.
 
 ## File Structure
 
@@ -85,7 +88,7 @@ Replace `package.json` with:
   "engines": { "node": ">=24" },
   "scripts": {
     "build": "tsc -p .",
-    "test": "node --test",
+    "test": "node --test 'src/**/*.test.ts'",
     "janus": "node src/cli.ts"
   },
   "license": "ISC",
