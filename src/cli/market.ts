@@ -9,7 +9,9 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
   const db = openDb();
   try {
     if (verb === "sync") {
-      const markets = await createLighterClient().fetchMarkets();
+      // See coverage.ts: JANUS_LIGHTER_URL lets tests (and any future replay
+      // tooling) point this at a stub instead of the real Lighter API.
+      const markets = await createLighterClient(process.env["JANUS_LIGHTER_URL"]).fetchMarkets();
       const synced_at = nowIso();
       return { synced: upsertMarkets(db, markets, synced_at), synced_at };
     }

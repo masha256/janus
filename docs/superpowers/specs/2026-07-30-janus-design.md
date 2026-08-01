@@ -49,7 +49,9 @@ Build for distribution with `tsc` (TypeScript 7.x, already present) to `dist/`.
 
 ## Data source: Lighter
 
-Base URL: `https://mainnet.zklighter.elliot.ai`
+Base URL: `https://mainnet.zklighter.elliot.ai`, overridable via `$JANUS_LIGHTER_URL` — the
+same pattern as `$JANUS_DB` below — so tests can point the client at a local stub server
+instead of the live API.
 
 | Endpoint | Use |
 |---|---|
