@@ -4,7 +4,7 @@ import { openDb } from "../connect.ts";
 import { migrate } from "../migrate.ts";
 import { upsertMarkets, listMarkets } from "./market.ts";
 import { addCluster, setClusterParam, getClusterParams, getGlobalParams, removeCluster } from "./cluster.ts";
-import { addAsset, listAssets, updateAsset, setAssetActive, eligibleAssets, requireAssetBySymbol } from "./asset.ts";
+import { addAsset, listAssets, updateAsset, setAssetActive, eligibleAssets, requireAssetBySymbol, removeAsset, requireSymbols } from "./asset.ts";
 import type { MarketInfo } from "../../lighter/client.ts";
 
 const NOW = "2026-07-31T12:00:00Z";
@@ -129,5 +129,44 @@ test("listAssets filters by active, class, and cluster", () => {
   assert.equal(listAssets(db, { active: false }).length, 1);
   assert.equal(listAssets(db, { clusterKey: "majors" }).length, 1);
   assert.equal(listAssets(db, { cls: "crypto" }).length, 2);
+  db.close();
+});
+
+test("removeAsset on an asset with trades fails with VALIDATION, not a raw FK error", () => {
+  const db = fresh();
+  addAsset(db, "BTC", "crypto", null, null, NOW);
+  const a = requireAssetBySymbol(db, "BTC");
+  const insert = db.prepare(
+    `INSERT INTO trade (asset_id,direction,status,opened_on,initial_price,initial_stop,initial_risk,created_at)
+     VALUES (?,'long','closed','2026-07-31',100,90,10,?)`,
+  );
+  insert.run(a.id, NOW);
+  insert.run(a.id, NOW);
+  assert.throws(
+    () => removeAsset(db, "BTC"),
+    (e: Error & { code?: string }) =>
+      e.code === "VALIDATION" && e.message === "BTC has 2 trades; deactivate it instead of removing it",
+  );
+  assert.equal(listAssets(db, {}).length, 1, "the asset must survive the refusal");
+  db.close();
+});
+
+test("removeAsset still deletes an asset that never traded", () => {
+  const db = fresh();
+  addAsset(db, "BTC", "crypto", null, null, NOW);
+  removeAsset(db, "BTC");
+  assert.equal(listAssets(db, {}).length, 0);
+  db.close();
+});
+
+test("requireSymbols uppercases and rejects unknown symbols naming them all", () => {
+  const db = fresh();
+  addAsset(db, "BTC", "crypto", null, null, NOW);
+  assert.deepEqual(requireSymbols(db, ["btc", "BTC"]), ["BTC"], "uppercased and deduped");
+  assert.equal(requireSymbols(db, undefined), undefined, "absent means all");
+  assert.throws(
+    () => requireSymbols(db, ["btc", "nosuch"]),
+    (e: Error & { code?: string }) => e.code === "VALIDATION" && /NOSUCH/.test(e.message),
+  );
   db.close();
 });

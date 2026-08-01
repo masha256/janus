@@ -36,12 +36,12 @@ async function withHarness(run: () => Promise<void>): Promise<void> {
   }
 }
 
-const OPEN_ARGS = ["BTC", "--price", "100", "--stop", "90", "--risk", "100", "--notional", "1000", "--date", DATE];
+const OPEN_ARGS = ["BTC", "--direction", "long", "--price", "100", "--stop", "90", "--risk", "100", "--notional", "1000", "--date", DATE];
 
 test("--price 0 is rejected with VALIDATION", async () => {
   await withHarness(async () => {
     await assert.rejects(
-      () => handle("open", ["BTC", "--price", "0", "--stop", "90", "--risk", "100", "--notional", "1000"]),
+      () => handle("open", ["BTC", "--direction", "long", "--price", "0", "--stop", "90", "--risk", "100", "--notional", "1000"]),
       (e: Error & { code?: string }) => e.code === "VALIDATION",
     );
   });
@@ -50,7 +50,7 @@ test("--price 0 is rejected with VALIDATION", async () => {
 test("--stop 0 on open is rejected with VALIDATION", async () => {
   await withHarness(async () => {
     await assert.rejects(
-      () => handle("open", ["BTC", "--price", "100", "--stop", "0", "--risk", "100", "--notional", "1000"]),
+      () => handle("open", ["BTC", "--direction", "long", "--price", "100", "--stop", "0", "--risk", "100", "--notional", "1000"]),
       (e: Error & { code?: string }) => e.code === "VALIDATION",
     );
   });
@@ -59,7 +59,7 @@ test("--stop 0 on open is rejected with VALIDATION", async () => {
 test("--notional 0 on open is rejected with VALIDATION", async () => {
   await withHarness(async () => {
     await assert.rejects(
-      () => handle("open", ["BTC", "--price", "100", "--stop", "90", "--risk", "100", "--notional", "0"]),
+      () => handle("open", ["BTC", "--direction", "long", "--price", "100", "--stop", "90", "--risk", "100", "--notional", "0"]),
       (e: Error & { code?: string }) => e.code === "VALIDATION",
     );
   });
@@ -67,7 +67,7 @@ test("--notional 0 on open is rejected with VALIDATION", async () => {
 
 test("--risk 0 on open is accepted (free carry)", async () => {
   await withHarness(async () => {
-    const opened = (await handle("open", ["BTC", "--price", "100", "--stop", "90", "--risk", "0", "--notional", "1000"])) as {
+    const opened = (await handle("open", ["BTC", "--direction", "long", "--price", "100", "--stop", "90", "--risk", "0", "--notional", "1000"])) as {
       trade: { initial_risk: number };
     };
     assert.equal(opened.trade.initial_risk, 0);
@@ -160,5 +160,60 @@ test("--unit scopes exit to a single unit, leaving the trade open", async () => 
     assert.equal(exited.closed, 1);
     assert.equal(exited.trade_status, "open");
     assert.equal(exited.summary.open_units, 1);
+  });
+});
+
+test("--direction sideways is rejected with VALIDATION", async () => {
+  await withHarness(async () => {
+    await assert.rejects(
+      () => handle("open", ["BTC", "--direction", "sideways", "--price", "100", "--stop", "90", "--risk", "100", "--notional", "1000"]),
+      (e: Error & { code?: string }) => e.code === "VALIDATION" && /direction/.test(e.message),
+    );
+  });
+});
+
+test("omitting --direction is rejected rather than silently recording a long", async () => {
+  await withHarness(async () => {
+    await assert.rejects(
+      () => handle("open", ["BTC", "--price", "100", "--stop", "90", "--risk", "100", "--notional", "1000"]),
+      (e: Error & { code?: string }) => e.code === "VALIDATION" && /direction/.test(e.message),
+    );
+  });
+});
+
+test("--direction short records a short", async () => {
+  await withHarness(async () => {
+    const opened = (await handle("open", ["BTC", "--direction", "short", "--price", "100", "--stop", "110", "--risk", "100", "--notional", "1000"])) as {
+      trade: { direction: string };
+    };
+    assert.equal(opened.trade.direction, "short");
+  });
+});
+
+test("trade list --asset rejects an unknown symbol instead of returning empty", async () => {
+  await withHarness(async () => {
+    await handle("open", OPEN_ARGS);
+    await assert.rejects(
+      () => handle("list", ["--asset", "NOSUCH"]),
+      (e: Error & { code?: string }) => e.code === "VALIDATION" && /NOSUCH/.test(e.message),
+    );
+  });
+});
+
+test("trade list --asset uppercases the symbol", async () => {
+  await withHarness(async () => {
+    await handle("open", OPEN_ARGS);
+    const result = (await handle("list", ["--asset", "btc"])) as { count: number };
+    assert.equal(result.count, 1);
+  });
+});
+
+test("trade with no verb names the verbs instead of quoting undefined", async () => {
+  await withHarness(async () => {
+    await assert.rejects(
+      () => handle(undefined, []),
+      (e: Error & { code?: string }) =>
+        e.code === "VALIDATION" && e.message === "trade requires a verb; try: open, add-unit, set-stop, exit, list, show",
+    );
   });
 });

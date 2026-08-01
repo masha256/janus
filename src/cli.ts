@@ -6,6 +6,7 @@ const NOUNS: Record<string, () => Promise<{ handle: Handler }>> = {
   init: () => import("./cli/init.ts"),
   market: () => import("./cli/market.ts"),
   cluster: () => import("./cli/cluster.ts"),
+  param: () => import("./cli/param.ts"),
   asset: () => import("./cli/asset.ts"),
   session: () => import("./cli/session.ts"),
   regime: () => import("./cli/regime.ts"),

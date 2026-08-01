@@ -1,12 +1,12 @@
 import { parseArgs } from "node:util";
 import { openDb } from "../db/connect.ts";
-import { resolveSession, stampPhase } from "../db/repo/session.ts";
-import { eligibleAssets } from "../db/repo/asset.ts";
+import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
+import { eligibleAssets, requireSymbols } from "../db/repo/asset.ts";
 import { upsertCoverage, listCoverage } from "../db/repo/coverage.ts";
 import { computeCoverage } from "../domain/coverage.ts";
 import { createLighterClient } from "../lighter/client.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
-import { csv } from "./args.ts";
+import { csv, unknownVerb } from "./args.ts";
 import { JanusError } from "../output.ts";
 import type { AssetRow } from "../db/repo/asset.ts";
 
@@ -69,8 +69,12 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
 
       upsertCoverage(db, session.session_date, rows);
 
-      // Only a full run that covered every eligible asset completes the phase.
-      const full = symbols === undefined && skipped.length === 0;
+      // A full run (no --asset) completes the phase even when some assets were
+      // skipped: a skipped asset has no data to record, and blocking on one
+      // would deadlock the pipeline behind a permanently zero-bar market that
+      // eligibleAssets keeps in scope because an open trade holds it there.
+      // `skipped` in the payload is how the agent learns coverage is partial.
+      const full = symbols === undefined;
       if (full) stampPhase(db, session.session_date, "coverage", now);
 
       return {
@@ -83,12 +87,12 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
     }
 
     if (verb === "list") {
-      const session = resolveSession(db, values.date, nowIso());
-      const rows = listCoverage(db, session.session_date, symbols);
-      return { session_date: session.session_date, count: rows.length, coverage: rows };
+      const date = readSessionDate(db, values.date, nowIso());
+      const rows = listCoverage(db, date, requireSymbols(db, symbols));
+      return { session_date: date, count: rows.length, coverage: rows };
     }
 
-    throw new JanusError("VALIDATION", `unknown verb "${verb}" for coverage; try: run, list`);
+    throw unknownVerb(verb, "coverage", "run, list");
   } finally {
     db.close();
   }

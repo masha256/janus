@@ -65,3 +65,50 @@ test("with a cluster present, a regime record does NOT stamp cluster_read", asyn
     rmSync(file, { force: true });
   }
 });
+
+// node:util.parseArgs reads a leading `-` as the next option, so `--score -2`
+// fails as ambiguous. The `--flag=-2` form is the documented way to pass a
+// negative (see README) and it is the only way the bearish half of the scale
+// is reachable — hence this test.
+test("--score=-2 records a bearish regime", async () => {
+  const file = freshDbFile();
+  process.env["JANUS_DB"] = file;
+  try {
+    const result = (await handle("record", [
+      "--date", DATE, "--state", "RISK_OFF", "--score=-2",
+      "--confidence=0.5", "--summary", "risk off",
+    ])) as { read: { score: number; state: string } };
+    assert.equal(result.read.score, -2);
+    assert.equal(result.read.state, "RISK_OFF");
+  } finally {
+    delete process.env["JANUS_DB"];
+    rmSync(file, { force: true });
+  }
+});
+
+test("the space-separated `--score -2` form fails with VALIDATION, not silently", async () => {
+  const file = freshDbFile();
+  process.env["JANUS_DB"] = file;
+  try {
+    await assert.rejects(
+      () => handle("record", [
+        "--date", DATE, "--state", "RISK_OFF", "--score", "-2",
+        "--confidence", "0.5", "--summary", "risk off",
+      ]),
+      // parseArgs raises ERR_PARSE_ARGS_INVALID_OPTION_VALUE, which envelope()
+      // maps to VALIDATION; the message itself names the `=` fix.
+      (e: Error & { code?: string }) => /ERR_PARSE_ARGS_/.test(e.code ?? ""),
+    );
+  } finally {
+    delete process.env["JANUS_DB"];
+    rmSync(file, { force: true });
+  }
+});
+
+test("regime with no verb names the verbs instead of quoting undefined", async () => {
+  await assert.rejects(
+    () => handle(undefined, []),
+    (e: Error & { code?: string }) =>
+      e.code === "VALIDATION" && e.message === "regime requires a verb; try: record, show",
+  );
+});

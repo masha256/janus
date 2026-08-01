@@ -201,3 +201,35 @@ test("NOT_FOUND for a symbol not on the roster", async () => {
     );
   });
 });
+
+// See regime.test.ts: parseArgs cannot take `--score -1.5`, so the bearish half
+// of the scale is only reachable through the `=` form documented in the README.
+test("--score=-1.5 records a bearish screen and does not flag", async () => {
+  await withHarness(async (file) => {
+    withDb(file, (db) => {
+      const asset = addAsset(db, "BTC", "crypto", null, null, NOW);
+      upsertCoverage(db, DATE, [{ asset_id: asset.id, values: stubCoverage(100) }]);
+    });
+
+    const result = (await handle("record", ["BTC", "--score=-1.5", "--confidence=0.5"])) as {
+      score: number;
+      flagged: boolean;
+    };
+    assert.equal(result.score, -1.5);
+    assert.equal(result.flagged, false);
+    withDb(file, (db) => {
+      const rows = listScreen(db, DATE, {}) as { score: number }[];
+      assert.equal(rows[0]!.score, -1.5, "the negative reached the database intact");
+    });
+  });
+});
+
+test("screen with no verb names the verbs instead of quoting undefined", async () => {
+  await withHarness(async () => {
+    await assert.rejects(
+      () => handle(undefined, []),
+      (e: Error & { code?: string }) =>
+        e.code === "VALIDATION" && e.message === "screen requires a verb; try: record, list",
+    );
+  });
+});

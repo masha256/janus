@@ -1,12 +1,12 @@
 import { parseArgs } from "node:util";
 import { openDb } from "../db/connect.ts";
-import { resolveSession, stampPhase } from "../db/repo/session.ts";
+import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
 import { requireAssetBySymbol } from "../db/repo/asset.ts";
 import { getClusterParams, getGlobalParams } from "../db/repo/cluster.ts";
 import { recordScreen, listScreen, countCoverage, countScreened } from "../db/repo/screen.ts";
 import { resolveParams } from "../domain/params.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
-import { num, readText, required } from "./args.ts";
+import { num, readText, required, unknownVerb } from "./args.ts";
 import { JanusError } from "../output.ts";
 
 export async function handle(verb: string | undefined, argv: string[]): Promise<unknown> {
@@ -62,12 +62,12 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
     }
 
     if (verb === "list") {
-      const session = resolveSession(db, values.date, nowIso());
-      const rows = listScreen(db, session.session_date, { flaggedOnly: values.flagged });
-      return { session_date: session.session_date, count: rows.length, screens: rows };
+      const date = readSessionDate(db, values.date, nowIso());
+      const rows = listScreen(db, date, { flaggedOnly: values.flagged });
+      return { session_date: date, count: rows.length, screens: rows };
     }
 
-    throw new JanusError("VALIDATION", `unknown verb "${verb}" for screen; try: record, list`);
+    throw unknownVerb(verb, "screen", "record, list");
   } finally {
     db.close();
   }

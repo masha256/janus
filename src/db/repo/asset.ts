@@ -114,7 +114,36 @@ export function setAssetActive(db: DatabaseSync, symbol: string, active: boolean
 
 export function removeAsset(db: DatabaseSync, symbol: string): void {
   const asset = requireAssetBySymbol(db, symbol);
+  // trade.asset_id has no ON DELETE action, so without this the FK failure
+  // surfaces as INTERNAL — the one code that tells an agent nothing actionable.
+  const { n } = db
+    .prepare("SELECT COUNT(*) AS n FROM trade WHERE asset_id = ?")
+    .get(asset.id) as { n: number };
+  if (n > 0) {
+    throw new JanusError(
+      "VALIDATION",
+      `${asset.symbol} has ${n} trade${n === 1 ? "" : "s"}; deactivate it instead of removing it`,
+    );
+  }
   db.prepare("DELETE FROM asset WHERE id = ?").run(asset.id);
+}
+
+/**
+ * Normalise an `--asset` list for a read: uppercase, dedup, and reject unknown
+ * symbols naming them all, so a retry on a subset can never be silently empty.
+ */
+export function requireSymbols(
+  db: DatabaseSync,
+  symbols: string[] | undefined,
+): string[] | undefined {
+  if (symbols === undefined) return undefined;
+  const wanted = [...new Set(symbols.map((s) => s.toUpperCase()))];
+  const known = new Set(listAssets(db, {}).map((a) => a.symbol));
+  const missing = wanted.filter((s) => !known.has(s));
+  if (missing.length > 0) {
+    throw new JanusError("VALIDATION", `not in the roster: ${missing.join(", ")}`);
+  }
+  return wanted;
 }
 
 /**

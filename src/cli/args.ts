@@ -38,6 +38,15 @@ export function positive(raw: string | undefined, flag: string): number {
   return n;
 }
 
+/** A tunable parameter value: any finite number, since weights may be negative. */
+export function finite(raw: string | undefined, flag: string): number {
+  const n = Number(required(raw, flag));
+  if (!Number.isFinite(n)) {
+    throw new JanusError("VALIDATION", `${flag} must be a number, got ${raw}`);
+  }
+  return n;
+}
+
 export function oneOf<T extends string>(
   raw: string | undefined,
   flag: string,
@@ -48,6 +57,16 @@ export function oneOf<T extends string>(
     throw new JanusError("VALIDATION", `--${flag} must be one of ${allowed.join(", ")}, got ${v}`);
   }
   return v as T;
+}
+
+/** The tail of every command module: names the verbs, and says so differently when none was given. */
+export function unknownVerb(verb: string | undefined, noun: string, verbs: string): JanusError {
+  return new JanusError(
+    "VALIDATION",
+    verb === undefined
+      ? `${noun} requires a verb; try: ${verbs}`
+      : `unknown verb "${verb}" for ${noun}; try: ${verbs}`,
+  );
 }
 
 /** `--asset BTC,ETH` → ["BTC","ETH"]; absent → undefined (meaning "all"). */

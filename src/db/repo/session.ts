@@ -31,6 +31,20 @@ export function resolveSession(
   return ensureSession(db, todayNY(new Date(now)), now);
 }
 
+/**
+ * The read-only counterpart of resolveSession: the date a read should query,
+ * without creating a session. `janus score list` on a fresh database must not
+ * make a session appear — only a phase command opens one.
+ */
+export function readSessionDate(
+  db: DatabaseSync,
+  dateFlag: string | undefined,
+  now: string,
+): string {
+  if (dateFlag !== undefined) return requireSession(db, dateFlag).session_date;
+  return todayNY(new Date(now));
+}
+
 export function listSessions(db: DatabaseSync, limit: number): SessionRow[] {
   return db
     .prepare("SELECT * FROM session ORDER BY session_date DESC LIMIT ?")

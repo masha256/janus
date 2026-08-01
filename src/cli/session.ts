@@ -3,6 +3,7 @@ import { openDb } from "../db/connect.ts";
 import { getSession, listSessions } from "../db/repo/session.ts";
 import { eligibleAssets } from "../db/repo/asset.ts";
 import { nextPhase, todayNY, PHASES } from "../domain/session.ts";
+import { unknownVerb } from "./args.ts";
 import { JanusError } from "../output.ts";
 
 export async function handle(verb: string | undefined, argv: string[]): Promise<unknown> {
@@ -40,7 +41,7 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
       const sessions = listSessions(db, limit);
       return { count: sessions.length, sessions };
     }
-    throw new JanusError("VALIDATION", `unknown verb "${verb}" for session; try: status, list`);
+    throw unknownVerb(verb, "session", "status, list");
   } finally {
     db.close();
   }

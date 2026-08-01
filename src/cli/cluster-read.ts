@@ -1,11 +1,10 @@
 import { parseArgs } from "node:util";
 import { openDb } from "../db/connect.ts";
-import { resolveSession, stampPhase } from "../db/repo/session.ts";
+import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
 import { recordClusterRead, listClusterReads } from "../db/repo/phase.ts";
 import { requireClusterByKey, listClusters } from "../db/repo/cluster.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
-import { num, readText, required } from "./args.ts";
-import { JanusError } from "../output.ts";
+import { num, readText, required, unknownVerb } from "./args.ts";
 
 export async function handle(verb: string | undefined, argv: string[]): Promise<unknown> {
   const db = openDb();
@@ -46,11 +45,11 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
       };
     }
     if (verb === "list") {
-      const session = resolveSession(db, values.date, nowIso());
-      const reads = listClusterReads(db, session.session_date);
-      return { session_date: session.session_date, count: reads.length, reads };
+      const date = readSessionDate(db, values.date, nowIso());
+      const reads = listClusterReads(db, date);
+      return { session_date: date, count: reads.length, reads };
     }
-    throw new JanusError("VALIDATION", `unknown verb "${verb}" for cluster-read; try: record, list`);
+    throw unknownVerb(verb, "cluster-read", "record, list");
   } finally {
     db.close();
   }

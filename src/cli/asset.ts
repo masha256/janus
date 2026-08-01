@@ -5,8 +5,7 @@ import {
   updateAsset, setAssetActive, removeAsset,
 } from "../db/repo/asset.ts";
 import { nowIso } from "../domain/session.ts";
-import { readText, required, oneOf } from "./args.ts";
-import { JanusError } from "../output.ts";
+import { readText, required, oneOf, unknownVerb } from "./args.ts";
 
 export async function handle(verb: string | undefined, argv: string[]): Promise<unknown> {
   const db = openDb();
@@ -61,10 +60,7 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
       removeAsset(db, required(symbol, "symbol").toUpperCase());
       return { removed: symbol };
     }
-    throw new JanusError(
-      "VALIDATION",
-      `unknown verb "${verb}" for asset; try: add, list, show, set, activate, deactivate, rm`,
-    );
+    throw unknownVerb(verb, "asset", "add, list, show, set, activate, deactivate, rm");
   } finally {
     db.close();
   }

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../connect.ts";
 import { migrate } from "../migrate.ts";
-import { ensureSession, getSession, requireSession, resolveSession, listSessions, stampPhase } from "./session.ts";
+import { ensureSession, getSession, requireSession, resolveSession, readSessionDate, listSessions, stampPhase } from "./session.ts";
 
 const NOW = "2026-07-31T12:00:00Z";
 
@@ -73,5 +73,22 @@ test("listSessions returns newest first and honours the limit", () => {
   ensureSession(db, "2026-07-31", NOW);
   ensureSession(db, "2026-07-30", NOW);
   assert.deepEqual(listSessions(db, 2).map((s) => s.session_date), ["2026-07-31", "2026-07-30"]);
+  db.close();
+});
+
+test("readSessionDate resolves today without creating a session", () => {
+  const db = fresh();
+  const date = readSessionDate(db, undefined, NOW);
+  assert.equal(date, "2026-07-31", "12:00Z is still the 31st in New York");
+  assert.equal(listSessions(db, 10).length, 0, "a read must not open a session");
+  db.close();
+});
+
+test("readSessionDate with --date still requires the session to exist", () => {
+  const db = fresh();
+  assert.throws(
+    () => readSessionDate(db, "1999-01-01", NOW),
+    (e: Error & { code?: string }) => e.code === "SESSION_MISSING",
+  );
   db.close();
 });

@@ -7,8 +7,7 @@ import {
 import { listAssets } from "../db/repo/asset.ts";
 import { resolveParams } from "../domain/params.ts";
 import { nowIso } from "../domain/session.ts";
-import { readText, required } from "./args.ts";
-import { JanusError } from "../output.ts";
+import { finite, readText, required, unknownVerb } from "./args.ts";
 
 export async function handle(verb: string | undefined, argv: string[]): Promise<unknown> {
   const db = openDb();
@@ -43,16 +42,14 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
     if (verb === "set-param") {
       const [key, param, raw] = argv;
       const cluster = requireClusterByKey(db, required(key, "key"));
-      const value = Number(required(raw, "value"));
-      if (!Number.isFinite(value)) throw new JanusError("VALIDATION", `value must be a number, got ${raw}`);
-      setClusterParam(db, cluster.id, required(param, "param"), value);
+      setClusterParam(db, cluster.id, required(param, "param"), finite(raw, "value"));
       return { cluster: cluster.key, params: getClusterParams(db, cluster.id) };
     }
     if (verb === "rm") {
       removeCluster(db, required(argv[0], "key"));
       return { removed: argv[0] };
     }
-    throw new JanusError("VALIDATION", `unknown verb "${verb}" for cluster; try: add, list, show, set-param, rm`);
+    throw unknownVerb(verb, "cluster", "add, list, show, set-param, rm");
   } finally {
     db.close();
   }

@@ -1,11 +1,10 @@
 import { parseArgs } from "node:util";
 import { openDb } from "../db/connect.ts";
-import { resolveSession, stampPhase } from "../db/repo/session.ts";
+import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
 import { recordRegime, getRegime } from "../db/repo/phase.ts";
 import { listClusters } from "../db/repo/cluster.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
-import { num, oneOf, readText, required, pairs } from "./args.ts";
-import { JanusError } from "../output.ts";
+import { num, oneOf, readText, required, pairs, unknownVerb } from "./args.ts";
 
 const STATES = ["RISK_ON", "NEUTRAL", "RISK_OFF"] as const;
 
@@ -48,10 +47,10 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
       };
     }
     if (verb === "show") {
-      const session = resolveSession(db, values.date, nowIso());
-      return { session_date: session.session_date, ...(getRegime(db, session.session_date) as object) };
+      const date = readSessionDate(db, values.date, nowIso());
+      return { session_date: date, ...(getRegime(db, date) as object) };
     }
-    throw new JanusError("VALIDATION", `unknown verb "${verb}" for regime; try: record, show`);
+    throw unknownVerb(verb, "regime", "record, show");
   } finally {
     db.close();
   }

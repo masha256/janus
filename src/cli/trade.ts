@@ -1,10 +1,10 @@
 import { parseArgs } from "node:util";
 import { openDb } from "../db/connect.ts";
-import { requireAssetBySymbol } from "../db/repo/asset.ts";
+import { requireAssetBySymbol, requireSymbols } from "../db/repo/asset.ts";
 import { openTrade, addUnit, setStop, exitUnits, getTrade, listTrades } from "../db/repo/trade.ts";
 import { getSession } from "../db/repo/session.ts";
 import { todayNY, nowIso } from "../domain/session.ts";
-import { csv, num, positive, readText, required } from "./args.ts";
+import { csv, num, oneOf, positive, readText, required, unknownVerb } from "./args.ts";
 import { JanusError } from "../output.ts";
 
 // Risk may legitimately be 0 once a stop has been moved past entry (free carry).
@@ -43,7 +43,7 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
       const session = getSession(db, on);
       const id = openTrade(db, {
         asset_id: asset.id,
-        direction: values.direction === "short" ? "short" : "long",
+        direction: oneOf(values.direction, "direction", ["long", "short"] as const),
         opened_on: on,
         price: positive(values.price, "price"),
         stop: positive(values.stop, "stop"),
@@ -83,14 +83,11 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
 
     if (verb === "list") {
       const status = values.open === true ? "open" : values.closed === true ? "closed" : undefined;
-      const trades = listTrades(db, { status, symbols: csv(values.asset)?.map((s) => s.toUpperCase()) });
+      const trades = listTrades(db, { status, symbols: requireSymbols(db, csv(values.asset)) });
       return { count: trades.length, trades };
     }
 
-    throw new JanusError(
-      "VALIDATION",
-      `unknown verb "${verb}" for trade; try: open, add-unit, set-stop, exit, list, show`,
-    );
+    throw unknownVerb(verb, "trade", "open, add-unit, set-stop, exit, list, show");
   } finally {
     db.close();
   }

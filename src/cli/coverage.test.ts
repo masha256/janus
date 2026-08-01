@@ -26,11 +26,17 @@ const fixture = (name: string): Buffer =>
  * no fetch mocking library, no network. Task 18 will want the same shape of
  * stub for its own live-data replay, so this is written to be easy to lift out.
  */
-function startFakeLighter(): { url: string; close: () => Promise<void> } {
+function startFakeLighter(noBarsFor: number[] = []): { url: string; close: () => Promise<void> } {
   const server = http.createServer((req, res) => {
-    const path = new URL(req.url ?? "/", "http://x").pathname;
+    const url = new URL(req.url ?? "/", "http://x");
+    const path = url.pathname;
+    // A market in noBarsFor answers candles with an empty series, which is how
+    // a delisted or brand-new market behaves; computeCoverage then raises
+    // INSUFFICIENT_HISTORY and coverage run puts it in `skipped`.
+    const noBars = noBarsFor.includes(Number(url.searchParams.get("market_id")));
     const body =
-      path === "/api/v1/candles" ? fixture("candles")
+      path === "/api/v1/candles"
+        ? (noBars ? Buffer.from(JSON.stringify({ code: 200, r: "1d", c: [] })) : fixture("candles"))
       : path === "/api/v1/orderBookDetails" ? fixture("orderBookDetails")
       : null;
     if (body === null) {
@@ -70,8 +76,9 @@ function freshDbFile(): string {
 
 async function withHarness(
   run: (file: string) => Promise<void>,
+  noBarsFor: number[] = [],
 ): Promise<void> {
-  const fake = startFakeLighter();
+  const fake = startFakeLighter(noBarsFor);
   const file = freshDbFile();
   process.env["JANUS_DB"] = file;
   process.env["JANUS_LIGHTER_URL"] = fake.url;
@@ -136,5 +143,63 @@ test("--asset BTC,BTC-style duplicates are deduped to a single covered row", asy
   await withHarness(async () => {
     const result = (await handle("run", ["--asset", "XPL,XPL"])) as { covered: number };
     assert.equal(result.covered, 1);
+  });
+});
+
+// CC is market_id 101 in freshDbFile.
+const CC_MARKET_ID = 101;
+
+test("a zero-bar asset is skipped but no longer blocks the phase", async () => {
+  await withHarness(async (file) => {
+    const result = (await handle("run", [])) as {
+      covered: number;
+      skipped: { symbol: string }[];
+      phase_complete: boolean;
+    };
+    assert.equal(result.covered, 1, "only XPL had bars");
+    assert.deepEqual(result.skipped.map((s) => s.symbol), ["CC"], "the skip is reported to the agent");
+    assert.equal(result.phase_complete, true);
+
+    const db = openDb(file);
+    const session = getSession(db, DATE)!;
+    db.close();
+    assert.notEqual(session.coverage_at, null, "one dead market must not deadlock coverage forever");
+    // The real point: screening is reachable without --force.
+    assert.equal(nextPhase(session), "screen");
+  }, [CC_MARKET_ID]);
+});
+
+test("a scoped run still leaves the phase incomplete even with nothing skipped", async () => {
+  await withHarness(async () => {
+    const result = (await handle("run", ["--asset", "XPL"])) as { phase_complete: boolean };
+    assert.equal(result.phase_complete, false);
+  });
+});
+
+test("coverage list --asset uppercases the symbol", async () => {
+  await withHarness(async () => {
+    await handle("run", []);
+    const result = (await handle("list", ["--asset", "xpl"])) as { count: number };
+    assert.equal(result.count, 1, "a lowercase symbol must not read as no coverage");
+  });
+});
+
+test("coverage list --asset rejects an unknown symbol", async () => {
+  await withHarness(async () => {
+    await handle("run", []);
+    await assert.rejects(
+      () => handle("list", ["--asset", "NOSUCH,XPL"]),
+      (e: Error & { code?: string }) => e.code === "VALIDATION" && /NOSUCH/.test(e.message),
+    );
+  });
+});
+
+test("coverage with no verb names the verbs instead of quoting undefined", async () => {
+  await withHarness(async () => {
+    await assert.rejects(
+      () => handle(undefined, []),
+      (e: Error & { code?: string }) =>
+        e.code === "VALIDATION" && e.message === "coverage requires a verb; try: run, list",
+    );
   });
 });

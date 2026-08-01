@@ -3,7 +3,7 @@ import { openDb } from "../db/connect.ts";
 import { upsertMarkets, listMarkets } from "../db/repo/market.ts";
 import { createLighterClient } from "../lighter/client.ts";
 import { nowIso } from "../domain/session.ts";
-import { JanusError } from "../output.ts";
+import { unknownVerb } from "./args.ts";
 
 export async function handle(verb: string | undefined, argv: string[]): Promise<unknown> {
   const db = openDb();
@@ -23,7 +23,7 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
       const markets = listMarkets(db, { search: values.search, status: values.status });
       return { count: markets.length, markets };
     }
-    throw new JanusError("VALIDATION", `unknown verb "${verb}" for market; try: sync, list`);
+    throw unknownVerb(verb, "market", "sync, list");
   } finally {
     db.close();
   }

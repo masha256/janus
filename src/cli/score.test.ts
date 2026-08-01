@@ -171,3 +171,33 @@ test("score_at stamps only once every queued asset has been scored", async () =>
     });
   });
 });
+
+test("score list on a fresh database reports empty without opening a session", async () => {
+  await withHarness(async (file) => {
+    // The spec puts session creation on the first *phase* command; a read that
+    // makes a session appear in `session list` is a false pipeline start.
+    withDb(file, (db) => db.prepare("DELETE FROM session").run());
+
+    const result = (await handle("list", [])) as { count: number; scores: unknown[] };
+    assert.equal(result.count, 0);
+    assert.deepEqual(result.scores, []);
+
+    const queue = (await handle("queue", [])) as { count: number };
+    assert.equal(queue.count, 0);
+
+    withDb(file, (db) => {
+      const n = (db.prepare("SELECT COUNT(*) AS n FROM session").get() as { n: number }).n;
+      assert.equal(n, 0, "reads must leave session list empty");
+    });
+  });
+});
+
+test("score with no verb names the verbs instead of quoting undefined", async () => {
+  await withHarness(async () => {
+    await assert.rejects(
+      () => handle(undefined, []),
+      (e: Error & { code?: string }) =>
+        e.code === "VALIDATION" && e.message === "score requires a verb; try: queue, record, list",
+    );
+  });
+});

@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { openDb } from "../db/connect.ts";
-import { resolveSession, stampPhase } from "../db/repo/session.ts";
+import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
 import { requireAssetBySymbol } from "../db/repo/asset.ts";
 import { getClusterParams, getGlobalParams } from "../db/repo/cluster.ts";
 import { scoreQueue, positionOf, recordScore, listScores } from "../db/repo/score.ts";
@@ -10,7 +10,7 @@ import { resolveParams } from "../domain/params.ts";
 import { deriveScore } from "../domain/score.ts";
 import { deriveDirective, formatPosition } from "../domain/directive.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
-import { pairs, readText, required } from "./args.ts";
+import { pairs, readText, required, unknownVerb } from "./args.ts";
 import { JanusError } from "../output.ts";
 
 export async function handle(verb: string | undefined, argv: string[]): Promise<unknown> {
@@ -26,16 +26,16 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
     });
 
     if (verb === "queue") {
-      const session = resolveSession(db, values.date, nowIso());
-      const queue = scoreQueue(db, session.session_date);
-      const coverage = listCoverage(db, session.session_date) as { symbol: string }[];
-      const screens = listScreen(db, session.session_date, {}) as { symbol: string }[];
+      const date = readSessionDate(db, values.date, nowIso());
+      const queue = scoreQueue(db, date);
+      const coverage = listCoverage(db, date) as { symbol: string }[];
+      const screens = listScreen(db, date, {}) as { symbol: string }[];
       const bySymbol = <T extends { symbol: string }>(rows: T[]): Map<string, T> =>
         new Map(rows.map((r) => [r.symbol, r]));
       const cov = bySymbol(coverage);
       const scr = bySymbol(screens);
       return {
-        session_date: session.session_date,
+        session_date: date,
         count: queue.length,
         queue: queue.map((q) => ({
           ...q,
@@ -98,12 +98,12 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
     }
 
     if (verb === "list") {
-      const session = resolveSession(db, values.date, nowIso());
-      const scores = listScores(db, session.session_date);
-      return { session_date: session.session_date, count: scores.length, scores };
+      const date = readSessionDate(db, values.date, nowIso());
+      const scores = listScores(db, date);
+      return { session_date: date, count: scores.length, scores };
     }
 
-    throw new JanusError("VALIDATION", `unknown verb "${verb}" for score; try: queue, record, list`);
+    throw unknownVerb(verb, "score", "queue, record, list");
   } finally {
     db.close();
   }
