@@ -26,6 +26,18 @@ export function num(raw: string | undefined, flag: string, min: number, max: num
   return n;
 }
 
+/** A price, size, or money amount: finite and strictly greater than zero. */
+export function positive(raw: string | undefined, flag: string): number {
+  const n = Number(required(raw, flag));
+  if (!Number.isFinite(n)) {
+    throw new JanusError("VALIDATION", `--${flag} must be a number, got ${raw}`);
+  }
+  if (n <= 0) {
+    throw new JanusError("VALIDATION", `--${flag} must be greater than zero, got ${n}`);
+  }
+  return n;
+}
+
 export function oneOf<T extends string>(
   raw: string | undefined,
   flag: string,

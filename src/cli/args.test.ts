@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { JanusError } from "../output.ts";
-import { csv, num, oneOf, pairs, required } from "./args.ts";
+import { csv, num, oneOf, pairs, positive, required } from "./args.ts";
 
 function codeOf(fn: () => unknown): string {
   try {
@@ -34,6 +34,22 @@ test("num accepts the inclusive boundaries", () => {
 
 test("num rejects whitespace-only input", () => {
   assert.equal(codeOf(() => num("   ", "score", 0, 10)), "VALIDATION");
+});
+
+test("positive rejects zero", () => {
+  assert.equal(codeOf(() => positive("0", "price")), "VALIDATION");
+});
+
+test("positive rejects a negative number", () => {
+  assert.equal(codeOf(() => positive("-5", "price")), "VALIDATION");
+});
+
+test("positive rejects non-numeric input", () => {
+  assert.equal(codeOf(() => positive("abc", "price")), "VALIDATION");
+});
+
+test("positive accepts a small positive number", () => {
+  assert.equal(positive("1e-8", "price"), 1e-8);
 });
 
 test("oneOf accepts a member and rejects a non-member", () => {

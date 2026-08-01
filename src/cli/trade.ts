@@ -4,14 +4,11 @@ import { requireAssetBySymbol } from "../db/repo/asset.ts";
 import { openTrade, addUnit, setStop, exitUnits, getTrade, listTrades } from "../db/repo/trade.ts";
 import { getSession } from "../db/repo/session.ts";
 import { todayNY, nowIso } from "../domain/session.ts";
-import { csv, num, readText, required } from "./args.ts";
+import { csv, num, positive, readText, required } from "./args.ts";
 import { JanusError } from "../output.ts";
 
-const POSITIVE = Number.MAX_SAFE_INTEGER;
-// Prices and notional are money; 0 is never a legitimate value (it makes
-// size = notional / price blow up to Infinity in tradeSummary). Risk may
-// legitimately be 0 once a stop has been moved past entry (free carry).
-const MIN_PRICE = Number.MIN_VALUE;
+// Risk may legitimately be 0 once a stop has been moved past entry (free carry).
+const RISK_MAX = Number.MAX_SAFE_INTEGER;
 
 function tradeId(raw: string | undefined): number {
   const id = Number(required(raw, "trade_id"));
@@ -48,10 +45,10 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
         asset_id: asset.id,
         direction: values.direction === "short" ? "short" : "long",
         opened_on: on,
-        price: num(values.price, "price", MIN_PRICE, POSITIVE),
-        stop: num(values.stop, "stop", MIN_PRICE, POSITIVE),
-        risk: num(values.risk, "risk", 0, POSITIVE),
-        notional: num(values.notional, "notional", MIN_PRICE, POSITIVE),
+        price: positive(values.price, "price"),
+        stop: positive(values.stop, "stop"),
+        risk: num(values.risk, "risk", 0, RISK_MAX),
+        notional: positive(values.notional, "notional"),
         thesis: readText(values.thesis) ?? null,
         origin_session_date: session === undefined ? null : session.session_date,
       }, nowIso());
@@ -62,23 +59,23 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
       const id = tradeId(first);
       const newSeq = addUnit(db, id, {
         entry_on: on,
-        price: num(values.price, "price", MIN_PRICE, POSITIVE),
-        stop: num(values.stop, "stop", MIN_PRICE, POSITIVE),
-        risk: num(values.risk, "risk", 0, POSITIVE),
-        notional: num(values.notional, "notional", MIN_PRICE, POSITIVE),
+        price: positive(values.price, "price"),
+        stop: positive(values.stop, "stop"),
+        risk: num(values.risk, "risk", 0, RISK_MAX),
+        notional: positive(values.notional, "notional"),
       });
       return { seq: newSeq, ...(getTrade(db, id) as object) };
     }
 
     if (verb === "set-stop") {
       const id = tradeId(first);
-      const moved = setStop(db, id, num(values.stop, "stop", MIN_PRICE, POSITIVE), seq);
+      const moved = setStop(db, id, positive(values.stop, "stop"), seq);
       return { units_moved: moved, ...(getTrade(db, id) as object) };
     }
 
     if (verb === "exit") {
       const id = tradeId(first);
-      const res = exitUnits(db, id, num(values.price, "price", MIN_PRICE, POSITIVE), on, seq);
+      const res = exitUnits(db, id, positive(values.price, "price"), on, seq);
       return { ...res, ...(getTrade(db, id) as object) };
     }
 

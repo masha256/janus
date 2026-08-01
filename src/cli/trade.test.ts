@@ -47,6 +47,66 @@ test("--price 0 is rejected with VALIDATION", async () => {
   });
 });
 
+test("--stop 0 on open is rejected with VALIDATION", async () => {
+  await withHarness(async () => {
+    await assert.rejects(
+      () => handle("open", ["BTC", "--price", "100", "--stop", "0", "--risk", "100", "--notional", "1000"]),
+      (e: Error & { code?: string }) => e.code === "VALIDATION",
+    );
+  });
+});
+
+test("--notional 0 on open is rejected with VALIDATION", async () => {
+  await withHarness(async () => {
+    await assert.rejects(
+      () => handle("open", ["BTC", "--price", "100", "--stop", "90", "--risk", "100", "--notional", "0"]),
+      (e: Error & { code?: string }) => e.code === "VALIDATION",
+    );
+  });
+});
+
+test("--risk 0 on open is accepted (free carry)", async () => {
+  await withHarness(async () => {
+    const opened = (await handle("open", ["BTC", "--price", "100", "--stop", "90", "--risk", "0", "--notional", "1000"])) as {
+      trade: { initial_risk: number };
+    };
+    assert.equal(opened.trade.initial_risk, 0);
+  });
+});
+
+test("--price 0 on add-unit is rejected with VALIDATION", async () => {
+  await withHarness(async () => {
+    const opened = (await handle("open", OPEN_ARGS)) as { trade: { id: number } };
+    const id = String(opened.trade.id);
+    await assert.rejects(
+      () => handle("add-unit", [id, "--price", "0", "--stop", "100", "--risk", "100", "--notional", "1100"]),
+      (e: Error & { code?: string }) => e.code === "VALIDATION",
+    );
+  });
+});
+
+test("--stop 0 on set-stop is rejected with VALIDATION", async () => {
+  await withHarness(async () => {
+    const opened = (await handle("open", OPEN_ARGS)) as { trade: { id: number } };
+    const id = String(opened.trade.id);
+    await assert.rejects(
+      () => handle("set-stop", [id, "--stop", "0"]),
+      (e: Error & { code?: string }) => e.code === "VALIDATION",
+    );
+  });
+});
+
+test("--price 0 on exit is rejected with VALIDATION", async () => {
+  await withHarness(async () => {
+    const opened = (await handle("open", OPEN_ARGS)) as { trade: { id: number } };
+    const id = String(opened.trade.id);
+    await assert.rejects(
+      () => handle("exit", [id, "--price", "0", "--date", DATE]),
+      (e: Error & { code?: string }) => e.code === "VALIDATION",
+    );
+  });
+});
+
 test("a second open on the same asset fails with POSITION_CONFLICT", async () => {
   await withHarness(async () => {
     await handle("open", OPEN_ARGS);
