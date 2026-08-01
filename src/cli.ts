@@ -13,6 +13,7 @@ const NOUNS: Record<string, () => Promise<{ handle: Handler }>> = {
   coverage: () => import("./cli/coverage.ts"),
   screen: () => import("./cli/screen.ts"),
   score: () => import("./cli/score.ts"),
+  trade: () => import("./cli/trade.ts"),
 };
 
 async function main(): Promise<void> {
