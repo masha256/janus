@@ -7,6 +7,7 @@ import { resolveParams } from "../domain/params.js";
 import { deriveClusterRead } from "../domain/read.js";
 import { assertPhaseOrder, nowIso } from "../domain/session.js";
 import { finite, metricPairs, readText, required, unknownVerb } from "./args.js";
+import { JanusError } from "../output.js";
 import { collect, handler, withDb } from "./command.js";
 const VERBS = "add, list, show, set-param, rm, record, reads";
 export function build(emit) {
@@ -91,6 +92,9 @@ function record(key, opts) {
         // guarantees one exists — except under --force, where an empty read is
         // passed along rather than blocking the record.
         const macro = getMacro(db, session.session_date);
+        if (macro.read === undefined) {
+            throw new JanusError("PHASE_ORDER", "macro read must be recorded before cluster read");
+        }
         const params = resolveParams(getClusterParams(db, cluster.id), getGlobalParams(db));
         recordClusterRead(db, session.session_date, cluster.id, {
             metrics,

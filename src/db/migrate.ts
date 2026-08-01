@@ -54,7 +54,7 @@ CREATE TABLE session (
 
 CREATE TABLE macro_read (
   session_date  TEXT PRIMARY KEY REFERENCES session(session_date) ON DELETE CASCADE,
-  state         TEXT NOT NULL CHECK (state IN ('RISK_ON','NEUTRAL','RISK_OFF')),
+  state         TEXT NOT NULL DEFAULT 'NEUTRAL' CHECK (state IN ('RISK_ON','NEUTRAL','RISK_OFF')),
   summary       TEXT NOT NULL,
   recorded_at   TEXT NOT NULL
 );

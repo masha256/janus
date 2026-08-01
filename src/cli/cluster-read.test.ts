@@ -7,19 +7,21 @@ import { openDb } from "../db/connect.ts";
 import { migrate } from "../db/migrate.ts";
 import { ensureSession, stampPhase } from "../db/repo/session.ts";
 import { addCluster } from "../db/repo/cluster.ts";
+import { recordMacro } from "../db/repo/phase.ts";
 import { handle } from "./cluster.ts";
 
 const NOW = "2026-07-31T12:00:00Z";
 const DATE = "2026-07-31";
 
 // cluster record opens its own db via JANUS_DB, so a real temp file is
-// needed. macro must already be stamped for phase order to let it run.
+// needed. macro must already be recorded for phase order to let it run.
 function freshDbFile(): string {
   const dir = mkdtempSync(join(tmpdir(), "janus-cluster-read-test-"));
   const file = join(dir, "janus.db");
   const db = openDb(file);
   migrate(db);
   ensureSession(db, DATE, NOW);
+  recordMacro(db, DATE, { metrics: { regime: 0.5 }, results: {}, summary: "neutral" }, NOW);
   stampPhase(db, DATE, "macro", NOW);
   addCluster(db, "majors", "Majors", null, NOW);
   db.close();
@@ -37,21 +39,17 @@ async function withHarness(run: () => Promise<void>): Promise<void> {
   }
 }
 
-// See macro.test.ts: `--metric bias=-1` is one token, so the bearish half of
-// the scale survives option parsing in the plain space-separated form.
-// Judgement is free text riding the same flag, stored in value_text.
-test("--metric bias=-1 records a bearish cluster read alongside its judgement", async () => {
+test("cluster record stores whatever metrics the caller supplies", async () => {
   await withHarness(async () => {
     const result = (await handle("record", [
-      "majors", "--date", DATE, "--metric", "bias=-1",
-      "--metric", "judgement=majors look heavy",
+      "majors", "--date", DATE, "--metric", "breadth=0.7",
     ])) as { recorded: string; read: number };
     assert.equal(result.recorded, "majors");
 
     const list = (await handle("reads", ["--date", DATE])) as
-      { reads: { metrics: Record<string, number | string> }[] };
-    assert.equal(list.reads[0]!.metrics["bias"], -1, "the negative reached the database intact");
-    assert.equal(list.reads[0]!.metrics["judgement"], "majors look heavy");
+      { reads: { metrics: Record<string, number | string>; results: Record<string, number> }[] };
+    assert.equal(list.reads[0]!.metrics["breadth"], 0.7);
+    assert.equal(list.reads[0]!.results["regime_smile"], 0.3);
   });
 });
 
@@ -71,7 +69,7 @@ test("cluster with no verb names every verb, roster and phase alike", async () =
 test("cluster list stays the roster, not the session's reads", async () => {
   await withHarness(async () => {
     await handle("record", [
-      "majors", "--date", DATE, "--metric", "bias=1", "--metric", "judgement=intact",
+      "majors", "--date", DATE, "--metric", "breadth=0.7",
     ]);
     const roster = (await handle("list", [])) as { count: number; clusters: unknown[] };
     assert.equal(roster.count, 1);

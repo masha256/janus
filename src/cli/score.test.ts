@@ -84,7 +84,7 @@ test("a flagged asset scores, and strength/conviction/directive match the domain
   await withHarness(async (file) => {
     withDb(file, (db) => {
       recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-        { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
+        { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
     });
 
     const result = (await handle("record", ["BTC", "--factor", "catalyst=1.5", "--factor", "crowding=-0.5"])) as {
@@ -143,7 +143,7 @@ test("re-scoring replaces the previous metric rows rather than merging them", as
   await withHarness(async (file) => {
     withDb(file, (db) => {
       recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-        { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
+        { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
     });
 
     await handle("record", ["BTC", "--factor", "catalyst=2", "--factor", "vibes=1"]);
@@ -168,7 +168,7 @@ test("score_at stamps only once every queued asset has been scored", async () =>
   await withHarness(async (file) => {
     withDb(file, (db) => {
       recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-        { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
+        { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
       openTrade(db, "SOL", 1);
     });
 

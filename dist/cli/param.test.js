@@ -32,7 +32,7 @@ function freshDbFile() {
     // Deliberately unclustered: this is the asset that was stuck on DEFAULT_PARAMS
     // forever while global_param was unwritable.
     const asset = addAsset(db, "BTC", "crypto", null, null, NOW);
-    recordScreen(db, DATE, asset.id, { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
+    recordScreen(db, DATE, asset.id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
     db.close();
     return file;
 }
@@ -52,11 +52,11 @@ test("param list shows defaults until a global param overrides one", async () =>
         const before = (await handle("list", []));
         assert.deepEqual(before.global, {}, "a fresh database has no global overrides");
         assert.deepEqual(before.resolved, DEFAULT_PARAMS);
-        await handle("set", ["screen_flag_threshold", "1.8"]);
+        await handle("set", ["beta_factor", "1.8"]);
         const after = (await handle("list", []));
-        assert.deepEqual(after.global, { screen_flag_threshold: 1.8 });
-        assert.equal(after.resolved["screen_flag_threshold"], 1.8, "the global rung wins over the default");
-        assert.equal(after.resolved["conv_initiate"], DEFAULT_PARAMS["conv_initiate"], "untouched keys keep their default");
+        assert.deepEqual(after.global, { beta_factor: 1.8 });
+        assert.equal(after.resolved["beta_factor"], 1.8, "the global rung wins over the default");
+        assert.equal(after.resolved["max_units"], DEFAULT_PARAMS["max_units"], "untouched keys keep their default");
     });
 });
 test("param set rejects a non-numeric value", async () => {
@@ -74,9 +74,9 @@ test("param set rejects a non-numeric value", async () => {
 // negative half of every weight is unreachable.
 test("param set accepts a negative weight passed positionally", async () => {
     await withHarness(async () => {
-        await handle("set", ["w_crowding", "-2"]);
+        await handle("set", ["w_sentiment", "-2"]);
         const after = (await handle("list", []));
-        assert.equal(after.global["w_crowding"], -2);
+        assert.equal(after.global["w_sentiment"], -2);
     });
 });
 test("a global param reaches the scoring decision for an unclustered asset", async () => {

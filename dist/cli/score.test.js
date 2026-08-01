@@ -75,7 +75,7 @@ async function withHarness(run) {
 test("a flagged asset scores, and strength/conviction/directive match the domain formulas", async () => {
     await withHarness(async (file) => {
         withDb(file, (db) => {
-            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
+            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
         });
         const result = (await handle("record", ["BTC", "--factor", "catalyst=1.5", "--factor", "crowding=-0.5"]));
         const params = resolveParams({}, {});
@@ -113,7 +113,7 @@ test("an asset with an open trade but no flag is in the queue as open_trade", as
 test("re-scoring replaces the previous metric rows rather than merging them", async () => {
     await withHarness(async (file) => {
         withDb(file, (db) => {
-            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
+            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
         });
         await handle("record", ["BTC", "--factor", "catalyst=2", "--factor", "vibes=1"]);
         await handle("record", ["BTC", "--factor", "catalyst=1"]);
@@ -130,7 +130,7 @@ test("re-scoring replaces the previous metric rows rather than merging them", as
 test("score_at stamps only once every queued asset has been scored", async () => {
     await withHarness(async (file) => {
         withDb(file, (db) => {
-            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
+            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
             openTrade(db, "SOL", 1);
         });
         const first = (await handle("record", ["BTC", "--factor", "catalyst=1"]));

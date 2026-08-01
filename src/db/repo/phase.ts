@@ -8,7 +8,6 @@ export type ReadInput = {
 };
 
 export type MacroInput = ReadInput & {
-  state: string;
   summary: string;
 };
 
@@ -22,12 +21,12 @@ export function recordMacro(
   db.exec("BEGIN");
   try {
     db.prepare(
-      `INSERT INTO macro_read (session_date, state, summary, recorded_at)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO macro_read (session_date, summary, recorded_at)
+       VALUES (?, ?, ?)
        ON CONFLICT(session_date) DO UPDATE SET
-         state = excluded.state, summary = excluded.summary,
+         summary = excluded.summary,
          recorded_at = excluded.recorded_at`,
-    ).run(date, input.state, input.summary, now);
+    ).run(date, input.summary, now);
     replaceMetrics(db, "macro_read_metric", { session_date: date }, input.metrics);
     replaceMetrics(db, "macro_read_result", { session_date: date }, input.results);
     db.exec("COMMIT");
@@ -52,7 +51,7 @@ export function getMacro(db: DatabaseSync, date: string): MacroRead {
   };
 }
 
-/** The read row is bare — bias and judgement are metrics, the conclusions are results. */
+/** The read row is bare — whatever was observed lands in metrics, the only derived result is regime_smile. */
 export function recordClusterRead(
   db: DatabaseSync,
   date: string,

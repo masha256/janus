@@ -10,6 +10,7 @@ import { resolveParams } from "../domain/params.ts";
 import { deriveClusterRead } from "../domain/read.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
 import { finite, metricPairs, readText, required, unknownVerb } from "./args.ts";
+import { JanusError } from "../output.ts";
 import { collect, type Emit, handler, withDb } from "./command.ts";
 
 const VERBS = "add, list, show, set-param, rm, record, reads";
@@ -116,6 +117,9 @@ function record(key: string | undefined, opts: RecordOpts): Promise<unknown> {
     // guarantees one exists — except under --force, where an empty read is
     // passed along rather than blocking the record.
     const macro = getMacro(db, session.session_date);
+    if (macro.read === undefined) {
+      throw new JanusError("PHASE_ORDER", "macro read must be recorded before cluster read");
+    }
     const params = resolveParams(getClusterParams(db, cluster.id), getGlobalParams(db));
 
     recordClusterRead(db, session.session_date, cluster.id, {

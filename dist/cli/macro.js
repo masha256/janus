@@ -5,16 +5,14 @@ import { listClusters, getGlobalParams } from "../db/repo/cluster.js";
 import { resolveParams } from "../domain/params.js";
 import { deriveMacroRead } from "../domain/read.js";
 import { assertPhaseOrder, nowIso } from "../domain/session.js";
-import { metricPairs, oneOf, readText, required, unknownVerb } from "./args.js";
+import { metricPairs, readText, required, unknownVerb } from "./args.js";
 import { collect, handler, withDb } from "./command.js";
-const STATES = ["RISK_ON", "NEUTRAL", "RISK_OFF"];
 export function build(emit) {
     const cmd = new Command("macro")
         .description("The session's macro read (phase 1)")
         .action(() => { throw unknownVerb(undefined, "macro", "record, reads"); });
     cmd.command("record")
         .description("Record the macro read; completes phase 1")
-        .option("--state <STATE>", STATES.join(" | "))
         .option("--summary <TEXT>", "one line on the tape; - reads stdin")
         .option("--metric <KEY=VALUE>", "what the read observed; repeatable", collect)
         .option("--date <YYYY-MM-DD>", "address an existing session")
@@ -37,7 +35,6 @@ function record(opts) {
         // The macro read is session-wide, so it resolves against the global rung only.
         const params = resolveParams({}, getGlobalParams(db));
         recordMacro(db, session.session_date, {
-            state: oneOf(opts.state, "state", STATES),
             summary: required(readText(opts.summary), "summary"),
             metrics,
             results: deriveMacroRead(metrics, params),

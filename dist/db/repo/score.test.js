@@ -35,8 +35,8 @@ function openTrade(db, symbol, units) {
 }
 test("the queue is the union of flagged assets and open positions", () => {
     const db = fresh();
-    recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
-    recordScreen(db, DATE, requireAssetBySymbol(db, "ETH").id, { flagged: false, rationale: null, metrics: { score: 0.1, confidence: 0 }, results: { threshold: 1 } }, NOW);
+    recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
+    recordScreen(db, DATE, requireAssetBySymbol(db, "ETH").id, { flagged: false, rationale: null, metrics: { score: 1, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
     openTrade(db, "SOL", 1);
     const queue = scoreQueue(db, DATE);
     assert.deepEqual(queue.map((q) => [q.symbol, q.queue_reason]).sort(), [["BTC", "flagged"], ["SOL", "open_trade"]]);
@@ -44,7 +44,7 @@ test("the queue is the union of flagged assets and open positions", () => {
 });
 test("an asset both flagged and held reports reason both", () => {
     const db = fresh();
-    recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
+    recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
     openTrade(db, "BTC", 2);
     assert.equal(scoreQueue(db, DATE)[0].queue_reason, "both");
     db.close();
@@ -85,16 +85,16 @@ test("recordScore writes the row and its metrics together", () => {
     const id = requireAssetBySymbol(db, "BTC").id;
     recordScore(db, DATE, id, {
         ...scoreRow, rationale: "breakout",
-        metrics: { catalyst: 2, crowding: -1 },
-        results: { w_catalyst: 1, w_crowding: -1 },
+        metrics: { catalyst: 2, sentiment: -1 },
+        results: { w_catalyst: 1, w_sentiment: -1 },
     }, NOW);
     const rows = listScores(db, DATE);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].directive, "INITIATE");
     assert.equal(rows[0].strength, 1.5, "strength is a column, not a result");
     assert.equal(rows[0].conviction, 8);
-    assert.deepEqual(rows[0].metrics, { catalyst: 2, crowding: -1 }, "the factors as given");
-    assert.deepEqual(rows[0].results, { w_catalyst: 1, w_crowding: -1 }, "what was derived");
+    assert.deepEqual(rows[0].metrics, { catalyst: 2, sentiment: -1 }, "the factors as given");
+    assert.deepEqual(rows[0].results, { w_catalyst: 1, w_sentiment: -1 }, "what was derived");
     db.close();
 });
 test("re-scoring replaces the previous metrics and results rather than merging them", () => {

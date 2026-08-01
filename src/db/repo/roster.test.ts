@@ -78,10 +78,10 @@ test("removing a cluster detaches its assets rather than deleting them", () => {
 test("cluster params fall back to global", () => {
   const db = fresh();
   const c = addCluster(db, "majors", "Majors", null, NOW);
-  setClusterParam(db, c.id, "conv_add", 9);
-  setClusterParam(db, null, "conv_hold", 5);
-  assert.deepEqual(getClusterParams(db, c.id), { conv_add: 9 });
-  assert.deepEqual(getGlobalParams(db), { conv_hold: 5 });
+  setClusterParam(db, c.id, "w_catalyst", 2);
+  setClusterParam(db, null, "w_sentiment", 0.5);
+  assert.deepEqual(getClusterParams(db, c.id), { w_catalyst: 2 });
+  assert.deepEqual(getGlobalParams(db), { w_sentiment: 0.5 });
   assert.deepEqual(getClusterParams(db, null), {}, "no cluster means no cluster params");
   db.close();
 });
@@ -89,9 +89,9 @@ test("cluster params fall back to global", () => {
 test("setClusterParam overwrites an existing value", () => {
   const db = fresh();
   const c = addCluster(db, "majors", "Majors", null, NOW);
-  setClusterParam(db, c.id, "conv_add", 9);
-  setClusterParam(db, c.id, "conv_add", 8);
-  assert.deepEqual(getClusterParams(db, c.id), { conv_add: 8 });
+  setClusterParam(db, c.id, "w_catalyst", 2);
+  setClusterParam(db, c.id, "w_catalyst", 1.5);
+  assert.deepEqual(getClusterParams(db, c.id), { w_catalyst: 1.5 });
   db.close();
 });
 

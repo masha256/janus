@@ -27,8 +27,7 @@ test("zero clusters: a macro record vacuously completes cluster_read too", async
     process.env["JANUS_DB"] = file;
     try {
         await handle("record", [
-            "--date", DATE, "--state", "RISK_ON", "--metric", "score=1.5",
-            "--metric", "confidence=0.5", "--summary", "x",
+            "--date", DATE, "--metric", "regime=1.5", "--summary", "x",
         ]);
         const db = openDb(file);
         const session = getSession(db, DATE);
@@ -49,8 +48,7 @@ test("with a cluster present, a macro record does NOT stamp cluster_read", async
     process.env["JANUS_DB"] = file;
     try {
         await handle("record", [
-            "--date", DATE, "--state", "RISK_ON", "--metric", "score=1.5",
-            "--metric", "confidence=0.5", "--summary", "x",
+            "--date", DATE, "--metric", "regime=1.5", "--summary", "x",
         ]);
         const db = openDb(file);
         const session = getSession(db, DATE);
@@ -64,19 +62,19 @@ test("with a cluster present, a macro record does NOT stamp cluster_read", async
     }
 });
 // An argument parser reads a bare leading `-` as the next option, which is why
-// the old `--score -2` was rejected as ambiguous. `--metric score=-2` has no
-// such problem: the value is one token that starts with `s`, so the whole
+// the old `--score -2` was rejected as ambiguous. `--metric regime=-2` has no
+// such problem: the value is one token that starts with `r`, so the whole
 // bearish half of the scale is reachable in the plain space-separated form.
-test("--metric score=-2 records a bearish macro", async () => {
+test("--metric regime=-2 records a bearish macro", async () => {
     const file = freshDbFile();
     process.env["JANUS_DB"] = file;
     try {
         const result = (await handle("record", [
-            "--date", DATE, "--state", "RISK_OFF", "--metric", "score=-2",
-            "--metric", "confidence=0.5", "--summary", "risk off",
+            "--date", DATE, "--metric", "regime=-2", "--summary", "risk off",
         ]));
-        assert.equal(result.metrics["score"], -2);
-        assert.equal(result.read.state, "RISK_OFF");
+        assert.equal(result.metrics["regime"], -2);
+        assert.equal(result.read.state, "NEUTRAL");
+        assert.deepEqual(result.results, {});
     }
     finally {
         delete process.env["JANUS_DB"];
@@ -87,16 +85,14 @@ test("a missing or out-of-range required metric is a VALIDATION error", async ()
     const file = freshDbFile();
     process.env["JANUS_DB"] = file;
     const args = (...metric) => [
-        "--date", DATE, "--state", "RISK_ON", "--summary", "x",
+        "--date", DATE, "--summary", "x",
         ...metric.flatMap((m) => ["--metric", m]),
     ];
     try {
         for (const [why, metrics] of [
-            ["no score at all", ["confidence=0.5"]],
-            ["no confidence at all", ["score=1"]],
-            ["score out of range", ["score=3", "confidence=0.5"]],
-            ["confidence out of range", ["score=1", "confidence=-1"]],
-            ["score is text", ["score=high", "confidence=0.5"]],
+            ["no regime at all", []],
+            ["regime out of range", ["regime=3"]],
+            ["regime is text", ["regime=risk_on"]],
         ]) {
             await assert.rejects(() => handle("record", args(...metrics)), (e) => e.code === "VALIDATION", why);
         }

@@ -3,11 +3,11 @@ import { metricsByEntity, readMetrics, replaceMetrics } from "./metric.js";
 export function recordMacro(db, date, input, now) {
     db.exec("BEGIN");
     try {
-        db.prepare(`INSERT INTO macro_read (session_date, state, summary, recorded_at)
-       VALUES (?, ?, ?, ?)
+        db.prepare(`INSERT INTO macro_read (session_date, summary, recorded_at)
+       VALUES (?, ?, ?)
        ON CONFLICT(session_date) DO UPDATE SET
-         state = excluded.state, summary = excluded.summary,
-         recorded_at = excluded.recorded_at`).run(date, input.state, input.summary, now);
+         summary = excluded.summary,
+         recorded_at = excluded.recorded_at`).run(date, input.summary, now);
         replaceMetrics(db, "macro_read_metric", { session_date: date }, input.metrics);
         replaceMetrics(db, "macro_read_result", { session_date: date }, input.results);
         db.exec("COMMIT");
@@ -24,7 +24,7 @@ export function getMacro(db, date) {
         results: readMetrics(db, "macro_read_result", { session_date: date }),
     };
 }
-/** The read row is bare — bias and judgement are metrics, the conclusions are results. */
+/** The read row is bare — whatever was observed lands in metrics, the only derived result is regime_smile. */
 export function recordClusterRead(db, date, clusterId, input, now) {
     const scope = { session_date: date, cluster_id: clusterId };
     db.exec("BEGIN");

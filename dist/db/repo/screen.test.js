@@ -23,30 +23,30 @@ function fresh() {
 test("recordScreen stores what was observed, what was concluded, and the flag", () => {
     const db = fresh();
     const id = requireAssetBySymbol(db, "BTC").id;
-    recordScreen(db, DATE, id, { flagged: true, rationale: "breakout", metrics: { score: 1.5, confidence: 0.5 }, results: { threshold: 1.0 } }, NOW);
+    recordScreen(db, DATE, id, { flagged: true, rationale: "breakout", metrics: { score: 5, confidence: 0.5 }, results: { screen_score: 2.5, threshold: 1.0 } }, NOW);
     const rows = listScreen(db, DATE, {});
     assert.equal(rows.length, 1);
     assert.equal(rows[0].symbol, "BTC");
     assert.equal(rows[0].flagged, 1);
-    assert.deepEqual(rows[0].metrics, { score: 1.5, confidence: 0.5 });
-    assert.deepEqual(rows[0].results, { threshold: 1.0 });
+    assert.deepEqual(rows[0].metrics, { score: 5, confidence: 0.5 });
+    assert.deepEqual(rows[0].results, { screen_score: 2.5, threshold: 1.0 });
     db.close();
 });
 test("re-recording a screen overwrites it", () => {
     const db = fresh();
     const id = requireAssetBySymbol(db, "BTC").id;
-    recordScreen(db, DATE, id, { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0.5 }, results: { threshold: 1.0 } }, NOW);
-    recordScreen(db, DATE, id, { flagged: false, rationale: null, metrics: { score: 0.2, confidence: 0.5 }, results: { threshold: 1.0 } }, NOW);
+    recordScreen(db, DATE, id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 0.5 }, results: { screen_score: 2.5, threshold: 1.0 } }, NOW);
+    recordScreen(db, DATE, id, { flagged: false, rationale: null, metrics: { score: 1, confidence: 0.5 }, results: { screen_score: 0.5, threshold: 1.0 } }, NOW);
     const rows = listScreen(db, DATE, {});
     assert.equal(rows.length, 1);
-    assert.equal(rows[0].metrics["score"], 0.2);
+    assert.equal(rows[0].metrics["score"], 1);
     assert.equal(rows[0].flagged, 0);
     db.close();
 });
 test("listScreen can return only the flagged rows", () => {
     const db = fresh();
-    recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
-    recordScreen(db, DATE, requireAssetBySymbol(db, "ETH").id, { flagged: false, rationale: null, metrics: { score: 0.1, confidence: 0 }, results: { threshold: 1 } }, NOW);
+    recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 0.5 }, results: { screen_score: 2.5, threshold: 1 } }, NOW);
+    recordScreen(db, DATE, requireAssetBySymbol(db, "ETH").id, { flagged: false, rationale: null, metrics: { score: 1, confidence: 0.5 }, results: { screen_score: 0.5, threshold: 1 } }, NOW);
     assert.equal(countScreened(db, DATE), 2);
     const flagged = listScreen(db, DATE, { flaggedOnly: true });
     assert.deepEqual(flagged.map((r) => r.symbol), ["BTC"]);

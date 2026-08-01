@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { deriveScore, type ScoreContext } from "./score.ts";
 import { DEFAULT_PARAMS } from "./params.ts";
 
-const f = (catalyst: number, trend: number, secular: number, crowding: number) => ({
-  catalyst, trend, secular, crowding,
+const f = (catalyst: number, sentiment: number, trend: number, secular: number) => ({
+  catalyst, sentiment, trend, secular,
 });
 
 /** A context that concludes nothing: the metrics alone decide strength and conviction. */
@@ -25,13 +25,13 @@ const ctx = (macroTilt: number, clusterTilt: number | null): ScoreContext => ({
 
 test("spec worked examples", () => {
   const cases: [ReturnType<typeof f>, number, number][] = [
-    [f(2, 2, 2, -2), 2.0, 10],
-    [f(2, 2, 2, 2), 1.0, 6],
-    [f(0.5, 0.5, 0.5, -0.5), 0.5, 7],
-    [f(2, -1, -1, 1), -0.25, 4],
+    [f(2, 2, 2, 2), 2.0, 10],
+    [f(2, 2, 2, -2), 1.0, 6],
+    [f(0.5, 0.5, 0.5, -0.5), 0.25, 4],
+    [f(2, -1, -1, 1), 0.25, 2],
     [f(0, 2, 0, 0), 0.5, 3],
     [f(0, 0, 0, 0), 0.0, 1],
-    [f(-2, -2, -2, 2), -2.0, 10],
+    [f(-2, -2, -2, -2), -2.0, 10],
   ];
   for (const [factors, strength, conviction] of cases) {
     const got = deriveScore(factors, flat, DEFAULT_PARAMS);
@@ -56,10 +56,10 @@ test("no weighted factors yields a neutral score rather than dividing by zero", 
 });
 
 test("negative weights invert a factor", () => {
-  // crowding alone, heavily crowded, with w_crowding = -1 → bearish
-  const got = deriveScore({ crowding: 2 }, flat, DEFAULT_PARAMS);
+  // sentiment alone, extremely positive, with w_sentiment = -1 → bearish
+  const got = deriveScore({ sentiment: 2 }, flat, { ...DEFAULT_PARAMS, w_sentiment: -1 });
   assert.equal(got.strength, -2);
-  assert.equal(got.results["w_crowding"], -1.0);
+  assert.equal(got.results["w_sentiment"], -1.0);
 });
 
 test("strength is clamped into range", () => {
@@ -83,7 +83,7 @@ test("the directive is stubbed to NONE until the ladder is written", () => {
   assert.equal(deriveScore({ vibes: 1 }, flat, DEFAULT_PARAMS).directive, "NONE");
   const held: ScoreContext = {
     ...flat,
-    screen: { flagged: true, metrics: { score: 1.5 }, results: { threshold: 1 } },
+    screen: { flagged: true, metrics: { score: 5 }, results: { screen_score: 2.5, threshold: 1 } },
     positions: [{ asset_id: 1, symbol: "BTC", side: "long", units: 2 }],
   };
   assert.equal(deriveScore({ catalyst: 2 }, held, DEFAULT_PARAMS).directive, "NONE");

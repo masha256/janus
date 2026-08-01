@@ -5,12 +5,10 @@ import { listClusters, getGlobalParams } from "../db/repo/cluster.ts";
 import { resolveParams } from "../domain/params.ts";
 import { deriveMacroRead } from "../domain/read.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
-import { metricPairs, oneOf, readText, required, unknownVerb } from "./args.ts";
+import { metricPairs, readText, required, unknownVerb } from "./args.ts";
 import { collect, type Emit, handler, withDb } from "./command.ts";
 
-const STATES = ["RISK_ON", "NEUTRAL", "RISK_OFF"] as const;
-
-type RecordOpts = { state?: string; summary?: string; metric: string[]; date?: string; force?: boolean };
+type RecordOpts = { summary?: string; metric: string[]; date?: string; force?: boolean };
 
 export function build(emit: Emit): Command {
   const cmd = new Command("macro")
@@ -19,7 +17,6 @@ export function build(emit: Emit): Command {
 
   cmd.command("record")
     .description("Record the macro read; completes phase 1")
-    .option("--state <STATE>", STATES.join(" | "))
     .option("--summary <TEXT>", "one line on the tape; - reads stdin")
     .option("--metric <KEY=VALUE>", "what the read observed; repeatable", collect)
     .option("--date <YYYY-MM-DD>", "address an existing session")
@@ -46,7 +43,6 @@ function record(opts: RecordOpts): Promise<unknown> {
     const params = resolveParams({}, getGlobalParams(db));
 
     recordMacro(db, session.session_date, {
-      state: oneOf(opts.state, "state", STATES),
       summary: required(readText(opts.summary), "summary"),
       metrics,
       results: deriveMacroRead(metrics, params),
