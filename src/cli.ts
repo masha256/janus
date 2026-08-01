@@ -12,6 +12,7 @@ const NOUNS: Record<string, () => Promise<{ handle: Handler }>> = {
   "cluster-read": () => import("./cli/cluster-read.ts"),
   coverage: () => import("./cli/coverage.ts"),
   screen: () => import("./cli/screen.ts"),
+  score: () => import("./cli/score.ts"),
 };
 
 async function main(): Promise<void> {
