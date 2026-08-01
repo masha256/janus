@@ -76,7 +76,7 @@ test("param set rejects a non-numeric value", async () => {
   });
 });
 
-test("param set accepts a negative weight via the = form", async () => {
+test("param set accepts a negative weight passed positionally", async () => {
   await withHarness(async () => {
     await handle("set", ["w_crowding", "-2"]);
     const after = (await handle("list", [])) as { global: Record<string, number> };

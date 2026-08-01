@@ -74,11 +74,13 @@ janus regime record --score -2 ...     # ERROR — parseArgs cannot parse this
 janus regime record --score=-2 ...     # correct
 ```
 
-**Always use the `=` form for a negative value.** It applies to every signed flag:
-`--score`, `--bias`, `--confidence`, `--factor key=-1.5`, and `param set` /
-`cluster set-param` values. Positive values work either way. The failure is loud —
-`VALIDATION`, with a message naming the fix — but the whole bearish half of the scale is
-unreachable without it.
+**Always use the `=` form for a negative value on a flag.** It applies to every signed
+flag: `--score`, `--bias`, `--confidence`, and `--factor key=-1.5`. Positive values work
+either way. The failure is loud — `VALIDATION`, with a message naming the fix — but the
+whole bearish half of the scale is unreachable without it.
+
+`param set` and `cluster set-param` take their key and value as **positional arguments**,
+not flags, so they are unaffected — write `janus param set w_crowding -2` plainly.
 
 ## Sessions
 
