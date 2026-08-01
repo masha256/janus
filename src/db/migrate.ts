@@ -45,24 +45,32 @@ CREATE TABLE asset (
 CREATE TABLE session (
   session_date     TEXT PRIMARY KEY,
   opened_at        TEXT NOT NULL,
-  regime_at        TEXT,
+  macro_at        TEXT,
   cluster_read_at  TEXT,
   coverage_at      TEXT,
   screen_at        TEXT,
   score_at         TEXT
 );
 
-CREATE TABLE regime_read (
+CREATE TABLE macro_read (
   session_date  TEXT PRIMARY KEY REFERENCES session(session_date) ON DELETE CASCADE,
   state         TEXT NOT NULL CHECK (state IN ('RISK_ON','NEUTRAL','RISK_OFF')),
-  score         REAL NOT NULL CHECK (score BETWEEN -2.0 AND 2.0),
-  confidence    REAL NOT NULL CHECK (confidence BETWEEN 0.0 AND 2.0),
   summary       TEXT NOT NULL,
   recorded_at   TEXT NOT NULL
 );
 
-CREATE TABLE regime_metric (
-  session_date  TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
+-- What the read observed.
+CREATE TABLE macro_read_metric (
+  session_date  TEXT NOT NULL REFERENCES macro_read(session_date) ON DELETE CASCADE,
+  key           TEXT NOT NULL,
+  value_num     REAL,
+  value_text    TEXT,
+  PRIMARY KEY (session_date, key)
+);
+
+-- What it concluded, derived from the above at record time.
+CREATE TABLE macro_read_result (
+  session_date  TEXT NOT NULL REFERENCES macro_read(session_date) ON DELETE CASCADE,
   key           TEXT NOT NULL,
   value_num     REAL,
   value_text    TEXT,
@@ -72,10 +80,30 @@ CREATE TABLE regime_metric (
 CREATE TABLE cluster_read (
   session_date  TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
   cluster_id    INTEGER NOT NULL REFERENCES cluster(id) ON DELETE CASCADE,
-  bias          REAL NOT NULL CHECK (bias BETWEEN -2.0 AND 2.0),
-  judgement     TEXT NOT NULL,
   recorded_at   TEXT NOT NULL,
   PRIMARY KEY (session_date, cluster_id)
+);
+
+CREATE TABLE cluster_read_metric (
+  session_date  TEXT NOT NULL,
+  cluster_id    INTEGER NOT NULL,
+  key           TEXT NOT NULL,
+  value_num     REAL,
+  value_text    TEXT,
+  PRIMARY KEY (session_date, cluster_id, key),
+  FOREIGN KEY (session_date, cluster_id) REFERENCES cluster_read(session_date, cluster_id)
+    ON DELETE CASCADE
+);
+
+CREATE TABLE cluster_read_result (
+  session_date  TEXT NOT NULL,
+  cluster_id    INTEGER NOT NULL,
+  key           TEXT NOT NULL,
+  value_num     REAL,
+  value_text    TEXT,
+  PRIMARY KEY (session_date, cluster_id, key),
+  FOREIGN KEY (session_date, cluster_id) REFERENCES cluster_read(session_date, cluster_id)
+    ON DELETE CASCADE
 );
 
 CREATE TABLE coverage (
@@ -102,35 +130,68 @@ CREATE TABLE coverage (
 CREATE TABLE screen (
   session_date  TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
   asset_id      INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
-  score         REAL NOT NULL CHECK (score BETWEEN -2.0 AND 2.0),
-  confidence    REAL NOT NULL CHECK (confidence BETWEEN 0.0 AND 2.0),
-  threshold     REAL NOT NULL,
   flagged       INTEGER NOT NULL,
   rationale     TEXT,
   recorded_at   TEXT NOT NULL,
   PRIMARY KEY (session_date, asset_id)
 );
 
+CREATE TABLE screen_result (
+  session_date  TEXT NOT NULL,
+  asset_id      INTEGER NOT NULL,
+  key           TEXT NOT NULL,
+  value_num     REAL,
+  value_text    TEXT,
+  PRIMARY KEY (session_date, asset_id, key),
+  FOREIGN KEY (session_date, asset_id) REFERENCES screen(session_date, asset_id)
+    ON DELETE CASCADE
+);
+
+CREATE TABLE screen_metric (
+  session_date  TEXT NOT NULL,
+  asset_id      INTEGER NOT NULL,
+  key           TEXT NOT NULL,
+  value_num     REAL,
+  value_text    TEXT,
+  PRIMARY KEY (session_date, asset_id, key),
+  FOREIGN KEY (session_date, asset_id) REFERENCES screen(session_date, asset_id)
+    ON DELETE CASCADE
+);
+
+-- strength and conviction are columns, not results: every score has them, and
+-- they are what you sort and filter a session's decisions by.
 CREATE TABLE score (
   session_date    TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
   asset_id        INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
-  d               REAL NOT NULL CHECK (d BETWEEN -2.0 AND 2.0),
-  conv            REAL NOT NULL CHECK (conv BETWEEN 1 AND 10),
+  strength        REAL NOT NULL,
+  conviction      REAL NOT NULL,
   directive       TEXT NOT NULL,
   queue_reason    TEXT NOT NULL,
   position_state  TEXT NOT NULL,
-  params_json     TEXT NOT NULL,
   rationale       TEXT,
   recorded_at     TEXT NOT NULL,
   PRIMARY KEY (session_date, asset_id)
 );
 
-CREATE TABLE score_factor (
+-- The factors the agent supplied.
+CREATE TABLE score_metric (
   session_date  TEXT NOT NULL,
   asset_id      INTEGER NOT NULL,
   key           TEXT NOT NULL,
-  value         REAL NOT NULL CHECK (value BETWEEN -2.0 AND 2.0),
-  weight        REAL NOT NULL,
+  value_num     REAL,
+  value_text    TEXT,
+  PRIMARY KEY (session_date, asset_id, key),
+  FOREIGN KEY (session_date, asset_id) REFERENCES score(session_date, asset_id)
+    ON DELETE CASCADE
+);
+
+-- What the scoring formula concluded: strength, conviction, applied weights.
+CREATE TABLE score_result (
+  session_date  TEXT NOT NULL,
+  asset_id      INTEGER NOT NULL,
+  key           TEXT NOT NULL,
+  value_num     REAL,
+  value_text    TEXT,
   PRIMARY KEY (session_date, asset_id, key),
   FOREIGN KEY (session_date, asset_id) REFERENCES score(session_date, asset_id)
     ON DELETE CASCADE

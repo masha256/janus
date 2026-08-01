@@ -14,7 +14,7 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
       const date = values.date ?? todayNY();
       const session = getSession(db, date);
       if (session === undefined) {
-        return { session_date: date, exists: false, next_phase: "regime", eligible_assets: eligibleAssets(db).length };
+        return { session_date: date, exists: false, next_phase: "macro", eligible_assets: eligibleAssets(db).length };
       }
       const counts = db.prepare(
         `SELECT

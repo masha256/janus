@@ -6,7 +6,7 @@ import { ensureSession } from "./session.ts";
 import { upsertMarkets } from "./market.ts";
 import { addAsset, requireAssetBySymbol } from "./asset.ts";
 import { recordScreen } from "./screen.ts";
-import { scoreQueue, positionOf, recordScore, listScores } from "./score.ts";
+import { scoreQueue, positionOf, openPositions, recordScore, listScores } from "./score.ts";
 
 const NOW = "2026-07-31T12:00:00Z";
 const DATE = "2026-07-31";
@@ -43,9 +43,9 @@ function openTrade(db: ReturnType<typeof fresh>, symbol: string, units: number) 
 test("the queue is the union of flagged assets and open positions", () => {
   const db = fresh();
   recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-    { score: 1.5, confidence: 0, threshold: 1, flagged: true, rationale: null }, NOW);
+    { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
   recordScreen(db, DATE, requireAssetBySymbol(db, "ETH").id,
-    { score: 0.1, confidence: 0, threshold: 1, flagged: false, rationale: null }, NOW);
+    { flagged: false, rationale: null, metrics: { score: 0.1, confidence: 0 }, results: { threshold: 1 } }, NOW);
   openTrade(db, "SOL", 1);
 
   const queue = scoreQueue(db, DATE);
@@ -59,7 +59,7 @@ test("the queue is the union of flagged assets and open positions", () => {
 test("an asset both flagged and held reports reason both", () => {
   const db = fresh();
   recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-    { score: 1.5, confidence: 0, threshold: 1, flagged: true, rationale: null }, NOW);
+    { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
   openTrade(db, "BTC", 2);
   assert.equal(scoreQueue(db, DATE)[0]!.queue_reason, "both");
   db.close();
@@ -86,31 +86,74 @@ test("positionOf never reports a side with zero open units", () => {
   db.close();
 });
 
-test("recordScore writes the score and its factors together", () => {
+test("openPositions reports the whole book, and nothing with zero open units", () => {
   const db = fresh();
-  const id = requireAssetBySymbol(db, "BTC").id;
-  recordScore(db, DATE, id, {
-    d: 1.5, conv: 8, directive: "INITIATE", queue_reason: "flagged",
-    position_state: "flat", params_json: "{}", rationale: "breakout",
-  }, { catalyst: 2, crowding: -1 }, { catalyst: 1, crowding: -1 }, NOW);
+  openTrade(db, "BTC", 2);
+  const emptied = openTrade(db, "ETH", 1);
+  db.prepare("UPDATE trade_unit SET status = 'closed' WHERE trade_id = ?").run(emptied);
 
-  const rows = listScores(db, DATE) as { symbol: string; directive: string; factors: Record<string, unknown> }[];
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0]!.directive, "INITIATE");
-  assert.deepEqual(rows[0]!.factors, { catalyst: { value: 2, weight: 1 }, crowding: { value: -1, weight: -1 } });
+  assert.deepEqual(
+    openPositions(db).map((p) => ({ ...p })),
+    [{ asset_id: requireAssetBySymbol(db, "BTC").id, symbol: "BTC", side: "long", units: 2 }],
+    "a trade whose units have all closed is not a live position",
+  );
   db.close();
 });
 
-test("re-scoring replaces the previous factors rather than merging them", () => {
+type Metrics = Record<string, number | string>;
+
+const scoreRow = {
+  strength: 1.5, conviction: 8, directive: "INITIATE", queue_reason: "flagged",
+  position_state: "flat", rationale: null,
+};
+
+test("recordScore writes the row and its metrics together", () => {
   const db = fresh();
   const id = requireAssetBySymbol(db, "BTC").id;
-  const row = {
-    d: 1.5, conv: 8, directive: "INITIATE", queue_reason: "flagged",
-    position_state: "flat", params_json: "{}", rationale: null,
-  };
-  recordScore(db, DATE, id, row, { catalyst: 2, vibes: 1 }, { catalyst: 1, vibes: 0 }, NOW);
-  recordScore(db, DATE, id, row, { catalyst: 1 }, { catalyst: 1 }, NOW);
-  const rows = listScores(db, DATE) as { factors: Record<string, unknown> }[];
-  assert.deepEqual(Object.keys(rows[0]!.factors), ["catalyst"], "stale factors must not survive");
+  recordScore(db, DATE, id, {
+    ...scoreRow, rationale: "breakout",
+    metrics: { catalyst: 2, crowding: -1 },
+    results: { w_catalyst: 1, w_crowding: -1 },
+  }, NOW);
+
+  const rows = listScores(db, DATE) as
+    { symbol: string; directive: string; strength: number; conviction: number;
+      metrics: Metrics; results: Metrics }[];
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.directive, "INITIATE");
+  assert.equal(rows[0]!.strength, 1.5, "strength is a column, not a result");
+  assert.equal(rows[0]!.conviction, 8);
+  assert.deepEqual(rows[0]!.metrics, { catalyst: 2, crowding: -1 }, "the factors as given");
+  assert.deepEqual(rows[0]!.results, { w_catalyst: 1, w_crowding: -1 }, "what was derived");
+  db.close();
+});
+
+test("re-scoring replaces the previous metrics and results rather than merging them", () => {
+  const db = fresh();
+  const id = requireAssetBySymbol(db, "BTC").id;
+  recordScore(db, DATE, id, {
+    ...scoreRow,
+    metrics: { catalyst: 2, vibes: 1 },
+    results: { w_catalyst: 1, w_vibes: 0 },
+  }, NOW);
+  recordScore(db, DATE, id, {
+    ...scoreRow, metrics: { catalyst: 1 }, results: { w_catalyst: 1 },
+  }, NOW);
+  const rows = listScores(db, DATE) as { metrics: Metrics; results: Metrics }[];
+  assert.deepEqual(Object.keys(rows[0]!.metrics), ["catalyst"], "stale factors must not survive");
+  assert.deepEqual(
+    Object.keys(rows[0]!.results), ["w_catalyst"], "and neither must stale results",
+  );
+  db.close();
+});
+
+test("listScores orders by |strength| descending", () => {
+  const db = fresh();
+  for (const [symbol, strength] of [["BTC", 0.5], ["ETH", -1.9], ["SOL", 1.2]] as const) {
+    recordScore(db, DATE, requireAssetBySymbol(db, symbol).id,
+      { ...scoreRow, strength, metrics: {}, results: {} }, NOW);
+  }
+  const rows = listScores(db, DATE) as { symbol: string }[];
+  assert.deepEqual(rows.map((r) => r.symbol), ["ETH", "SOL", "BTC"]);
   db.close();
 });

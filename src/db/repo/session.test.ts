@@ -26,7 +26,7 @@ test("a new session has every phase timestamp null", () => {
   const db = fresh();
   const s = ensureSession(db, "2026-07-31", NOW);
   assert.deepEqual(
-    [s.regime_at, s.cluster_read_at, s.coverage_at, s.screen_at, s.score_at],
+    [s.macro_at, s.cluster_read_at, s.coverage_at, s.screen_at, s.score_at],
     [null, null, null, null, null],
   );
   db.close();
@@ -35,8 +35,8 @@ test("a new session has every phase timestamp null", () => {
 test("stampPhase records completion", () => {
   const db = fresh();
   ensureSession(db, "2026-07-31", NOW);
-  stampPhase(db, "2026-07-31", "regime", NOW);
-  assert.equal(requireSession(db, "2026-07-31").regime_at, NOW);
+  stampPhase(db, "2026-07-31", "macro", NOW);
+  assert.equal(requireSession(db, "2026-07-31").macro_at, NOW);
   db.close();
 });
 

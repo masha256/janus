@@ -13,7 +13,6 @@ import { recordScreen } from "../db/repo/screen.ts";
 import { nextPhase, todayNY } from "../domain/session.ts";
 import { resolveParams } from "../domain/params.ts";
 import { deriveScore } from "../domain/score.ts";
-import { deriveDirective } from "../domain/directive.ts";
 import { handle } from "./score.ts";
 
 const NOW = "2026-07-31T12:00:00Z";
@@ -23,7 +22,7 @@ const NOW = "2026-07-31T12:00:00Z";
 const DATE = todayNY();
 
 // score record opens its own db via JANUS_DB, so a real temp file (not
-// :memory:) is needed to observe what it wrote. Phase order requires regime,
+// :memory:) is needed to observe what it wrote. Phase order requires macro,
 // cluster_read, coverage, and screen to already be stamped before score can run.
 function freshDbFile(): string {
   const dir = mkdtempSync(join(tmpdir(), "janus-score-test-"));
@@ -31,7 +30,7 @@ function freshDbFile(): string {
   const db = openDb(file);
   migrate(db);
   ensureSession(db, DATE, NOW);
-  stampPhase(db, DATE, "regime", NOW);
+  stampPhase(db, DATE, "macro", NOW);
   stampPhase(db, DATE, "cluster_read", NOW);
   stampPhase(db, DATE, "coverage", NOW);
   stampPhase(db, DATE, "screen", NOW);
@@ -81,24 +80,33 @@ async function withHarness(run: (file: string) => Promise<void>): Promise<void> 
   }
 }
 
-test("a flagged asset scores, and d/conv/directive match what deriveScore/deriveDirective produce", async () => {
+test("a flagged asset scores, and strength/conviction/directive match the domain formulas", async () => {
   await withHarness(async (file) => {
     withDb(file, (db) => {
       recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-        { score: 1.5, confidence: 0, threshold: 1, flagged: true, rationale: null }, NOW);
+        { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
     });
 
     const result = (await handle("record", ["BTC", "--factor", "catalyst=1.5", "--factor", "crowding=-0.5"])) as {
-      d: number; conv: number; directive: string;
+      strength: number; conviction: number; directive: string; results: Record<string, number>;
     };
 
     const params = resolveParams({}, {});
-    const { d, conv } = deriveScore({ catalyst: 1.5, crowding: -0.5 }, params);
-    const directive = deriveDirective(d, conv, { side: null, units: 0 }, params);
+    const flat = {
+      macro: { metrics: {}, results: {} },
+      cluster: null,
+      screen: null,
+      positions: [],
+      asset: { symbol: "BTC", class: "crypto", cluster_id: null, coverage: null },
+    };
+    const expected = deriveScore({ catalyst: 1.5, crowding: -0.5 }, flat, params);
 
-    assert.equal(result.d, d);
-    assert.equal(result.conv, conv);
-    assert.equal(result.directive, directive);
+    assert.equal(result.strength, expected.strength);
+    assert.equal(result.conviction, expected.conviction);
+    assert.equal(result.directive, expected.directive);
+    // …and they are columns on the score row, not entries in the result bag.
+    assert.equal(result.results["strength"], undefined);
+    assert.equal(result.results["conviction"], undefined);
   });
 });
 
@@ -131,21 +139,27 @@ test("an asset with an open trade but no flag is in the queue as open_trade", as
   });
 });
 
-test("re-scoring replaces the previous factor rows rather than merging them", async () => {
+test("re-scoring replaces the previous metric rows rather than merging them", async () => {
   await withHarness(async (file) => {
     withDb(file, (db) => {
       recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-        { score: 1.5, confidence: 0, threshold: 1, flagged: true, rationale: null }, NOW);
+        { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
     });
 
     await handle("record", ["BTC", "--factor", "catalyst=2", "--factor", "vibes=1"]);
     await handle("record", ["BTC", "--factor", "catalyst=1"]);
 
     withDb(file, (db) => {
-      const rows = db
-        .prepare("SELECT key FROM score_factor WHERE session_date = ? AND asset_id = ?")
-        .all(DATE, requireAssetBySymbol(db, "BTC").id) as { key: string }[];
-      assert.deepEqual(rows.map((r) => r.key), ["catalyst"], "stale factors must not survive");
+      const id = requireAssetBySymbol(db, "BTC").id;
+      const keys = (table: string): string[] => (db
+        .prepare(`SELECT key FROM ${table} WHERE session_date = ? AND asset_id = ? ORDER BY key`)
+        .all(DATE, id) as { key: string }[]).map((r) => r.key);
+      assert.deepEqual(keys("score_metric"), ["catalyst"], "stale factors must not survive");
+      assert.deepEqual(
+        keys("score_result"),
+        ["cluster_aligned", "macro_aligned", "w_catalyst"],
+        "nor stale results",
+      );
     });
   });
 });
@@ -154,7 +168,7 @@ test("score_at stamps only once every queued asset has been scored", async () =>
   await withHarness(async (file) => {
     withDb(file, (db) => {
       recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-        { score: 1.5, confidence: 0, threshold: 1, flagged: true, rationale: null }, NOW);
+        { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
       openTrade(db, "SOL", 1);
     });
 

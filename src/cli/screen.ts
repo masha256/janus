@@ -5,8 +5,9 @@ import { requireAssetBySymbol } from "../db/repo/asset.ts";
 import { getClusterParams, getGlobalParams } from "../db/repo/cluster.ts";
 import { recordScreen, listScreen, countCoverage, countScreened } from "../db/repo/screen.ts";
 import { resolveParams } from "../domain/params.ts";
+import { deriveScreen } from "../domain/screen.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
-import { num, readText, required, unknownVerb } from "./args.ts";
+import { metricPairs, readText, required, unknownVerb } from "./args.ts";
 import { JanusError } from "../output.ts";
 
 export async function handle(verb: string | undefined, argv: string[]): Promise<unknown> {
@@ -16,7 +17,7 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
     const { values } = parseArgs({
       args: verb === "list" ? argv : rest,
       options: {
-        score: { type: "string" }, confidence: { type: "string" }, rationale: { type: "string" },
+        rationale: { type: "string" }, metric: { type: "string", multiple: true },
         flagged: { type: "boolean" }, date: { type: "string" }, force: { type: "boolean" },
       },
     });
@@ -35,15 +36,17 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
       }
 
       const params = resolveParams(getClusterParams(db, asset.cluster_id), getGlobalParams(db));
-      const threshold = params["screen_flag_threshold"]!;
-      const score = num(values.score, "score", -2, 2);
+
+      // Whatever was recorded goes through as-is; deriveScreen decides which
+      // metrics it cannot do without, and what they mean for the flag.
+      const metrics = metricPairs(values.metric, "metric");
+      const { flagged, results } = deriveScreen(metrics, params);
 
       recordScreen(db, session.session_date, asset.id, {
-        score,
-        confidence: num(values.confidence, "confidence", 0, 2),
-        threshold,
-        flagged: score >= threshold,
+        flagged,
         rationale: readText(values.rationale) ?? null,
+        metrics,
+        results,
       }, now);
 
       // The phase completes once every covered asset has been screened.
@@ -53,8 +56,7 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
       return {
         session_date: session.session_date,
         symbol: asset.symbol,
-        score, threshold,
-        flagged: score >= threshold,
+        metrics, results, flagged,
         screened: countScreened(db, session.session_date),
         of: countCoverage(db, session.session_date),
         phase_complete: complete,

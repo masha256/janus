@@ -15,9 +15,10 @@ test("migrate creates every table and is idempotent", () => {
     .map((r) => (r as { name: string }).name);
 
   for (const t of [
-    "asset", "cluster", "cluster_param", "cluster_read", "coverage",
-    "global_param", "market", "regime_metric", "regime_read", "score",
-    "score_factor", "screen", "session", "trade", "trade_unit",
+    "asset", "cluster", "cluster_param", "cluster_read", "cluster_read_metric",
+    "cluster_read_result", "coverage", "global_param", "market", "macro_read",
+    "macro_read_metric", "macro_read_result", "score", "score_metric", "score_result",
+    "screen", "screen_metric", "screen_result", "session", "trade", "trade_unit",
   ]) {
     assert.ok(names.includes(t), `missing table ${t}`);
   }
@@ -46,10 +47,10 @@ test("foreign keys cascade from session to its phase rows", () => {
   migrate(db);
   db.exec(`
     INSERT INTO session (session_date,opened_at) VALUES ('2026-07-31','2026-07-31T00:00:00Z');
-    INSERT INTO regime_read VALUES ('2026-07-31','NEUTRAL',0.5,0.5,'flat','2026-07-31T00:00:00Z');
+    INSERT INTO macro_read VALUES ('2026-07-31','NEUTRAL','flat','2026-07-31T00:00:00Z');
   `);
   db.exec("DELETE FROM session WHERE session_date='2026-07-31'");
-  const rows = db.prepare("SELECT COUNT(*) AS n FROM regime_read").get() as { n: number };
-  assert.equal(rows.n, 0, "regime_read should cascade");
+  const rows = db.prepare("SELECT COUNT(*) AS n FROM macro_read").get() as { n: number };
+  assert.equal(rows.n, 0, "macro_read should cascade");
   db.close();
 });

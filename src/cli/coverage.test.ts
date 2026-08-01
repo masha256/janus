@@ -57,7 +57,7 @@ function startFakeLighter(noBarsFor: number[] = []): { url: string; close: () =>
   };
 }
 
-// regime/coverage record open their own db via JANUS_DB, so a real temp file
+// macro/coverage record open their own db via JANUS_DB, so a real temp file
 // (not :memory:) is needed to observe what they wrote.
 function freshDbFile(): string {
   const dir = mkdtempSync(join(tmpdir(), "janus-coverage-test-"));
@@ -65,8 +65,8 @@ function freshDbFile(): string {
   const db = openDb(file);
   migrate(db);
   ensureSession(db, DATE, NOW);
-  // Skip past regime/cluster_read so assertPhaseOrder lets coverage run.
-  stampPhase(db, DATE, "regime", NOW);
+  // Skip past macro/cluster_read so assertPhaseOrder lets coverage run.
+  stampPhase(db, DATE, "macro", NOW);
   stampPhase(db, DATE, "cluster_read", NOW);
   upsertMarkets(db, [
     { symbol: "XPL", market_id: 71, market_type: "perp", status: "active", price_decimals: 5, size_decimals: 1, listed_at: "2025-01-01" },

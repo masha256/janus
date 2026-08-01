@@ -33,7 +33,7 @@ const stubCoverage = (close: number): CoverageValues => ({
 });
 
 // screen record opens its own db via JANUS_DB, so a real temp file (not
-// :memory:) is needed to observe what it wrote. Phase order requires regime,
+// :memory:) is needed to observe what it wrote. Phase order requires macro,
 // cluster_read, and coverage to already be stamped before screen can run.
 function freshDbFile(): string {
   const dir = mkdtempSync(join(tmpdir(), "janus-screen-test-"));
@@ -41,7 +41,7 @@ function freshDbFile(): string {
   const db = openDb(file);
   migrate(db);
   ensureSession(db, DATE, NOW);
-  stampPhase(db, DATE, "regime", NOW);
+  stampPhase(db, DATE, "macro", NOW);
   stampPhase(db, DATE, "cluster_read", NOW);
   stampPhase(db, DATE, "coverage", NOW);
   upsertMarkets(db, [
@@ -80,11 +80,11 @@ test("screening snapshots the threshold: a later retune does not rewrite history
       upsertCoverage(db, DATE, [{ asset_id: asset.id, values: stubCoverage(100) }]);
     });
 
-    const first = (await handle("record", ["BTC", "--score", "1.5", "--confidence", "0.5"])) as {
-      threshold: number;
+    const first = (await handle("record", ["BTC", "--metric", "score=1.5", "--metric", "confidence=0.5"])) as {
+      results: Record<string, number>;
       flagged: boolean;
     };
-    assert.equal(first.threshold, 1.0);
+    assert.equal(first.results["threshold"], 1.0);
     assert.equal(first.flagged, true);
 
     // Retune the global default upward past the already-recorded score.
@@ -92,18 +92,19 @@ test("screening snapshots the threshold: a later retune does not rewrite history
 
     // The stored row must still carry the OLD threshold and OLD flag.
     withDb(file, (db) => {
-      const rows = listScreen(db, DATE, {}) as { threshold: number; flagged: number }[];
+      const rows = listScreen(db, DATE, {}) as
+        { results: Record<string, number>; flagged: number }[];
       assert.equal(rows.length, 1);
-      assert.equal(rows[0]!.threshold, 1.0, "retuning must not rewrite the snapshotted threshold");
+      assert.equal(rows[0]!.results["threshold"], 1.0, "retuning must not rewrite the snapshotted threshold");
       assert.equal(rows[0]!.flagged, 1, "retuning must not rewrite the snapshotted flag");
     });
 
     // Re-screening the same asset picks up the new threshold.
-    const second = (await handle("record", ["BTC", "--score", "1.5", "--confidence", "0.5"])) as {
-      threshold: number;
+    const second = (await handle("record", ["BTC", "--metric", "score=1.5", "--metric", "confidence=0.5"])) as {
+      results: Record<string, number>;
       flagged: boolean;
     };
-    assert.equal(second.threshold, 1.8);
+    assert.equal(second.results["threshold"], 1.8);
     assert.equal(second.flagged, false, "1.5 no longer clears the retuned 1.8 threshold");
   });
 });
@@ -121,18 +122,18 @@ test("cluster override reaches the flag decision", async () => {
       ]);
     });
 
-    const btc = (await handle("record", ["BTC", "--score", "1.5", "--confidence", "0"])) as {
-      threshold: number;
+    const btc = (await handle("record", ["BTC", "--metric", "score=1.5", "--metric", "confidence=0"])) as {
+      results: Record<string, number>;
       flagged: boolean;
     };
-    assert.equal(btc.threshold, 1.8);
+    assert.equal(btc.results["threshold"], 1.8);
     assert.equal(btc.flagged, false, "1.5 is below the cluster's 1.8 threshold");
 
-    const eth = (await handle("record", ["ETH", "--score", "1.5", "--confidence", "0"])) as {
-      threshold: number;
+    const eth = (await handle("record", ["ETH", "--metric", "score=1.5", "--metric", "confidence=0"])) as {
+      results: Record<string, number>;
       flagged: boolean;
     };
-    assert.equal(eth.threshold, 1.0);
+    assert.equal(eth.results["threshold"], 1.0);
     assert.equal(eth.flagged, true, "1.5 clears the default 1.0 threshold for an uncluste​red asset");
   });
 });
@@ -144,7 +145,7 @@ test("score equal to the threshold flags (inclusive boundary)", async () => {
       upsertCoverage(db, DATE, [{ asset_id: asset.id, values: stubCoverage(100) }]);
     });
 
-    const result = (await handle("record", ["BTC", "--score", "1.0", "--confidence", "0"])) as {
+    const result = (await handle("record", ["BTC", "--metric", "score=1.0", "--metric", "confidence=0"])) as {
       flagged: boolean;
     };
     assert.equal(result.flagged, true, "score === threshold must flag, not require strictly greater");
@@ -162,7 +163,7 @@ test("screen_at stamps only once every covered asset has been screened", async (
       ]);
     });
 
-    const first = (await handle("record", ["BTC", "--score", "0.5", "--confidence", "0"])) as {
+    const first = (await handle("record", ["BTC", "--metric", "score=0.5", "--metric", "confidence=0"])) as {
       phase_complete: boolean;
     };
     assert.equal(first.phase_complete, false);
@@ -172,7 +173,7 @@ test("screen_at stamps only once every covered asset has been screened", async (
       assert.equal(nextPhase(session), "screen");
     });
 
-    const second = (await handle("record", ["ETH", "--score", "0.5", "--confidence", "0"])) as {
+    const second = (await handle("record", ["ETH", "--metric", "score=0.5", "--metric", "confidence=0"])) as {
       phase_complete: boolean;
     };
     assert.equal(second.phase_complete, true);
@@ -190,7 +191,7 @@ test("NO_COVERAGE for a rostered asset with no coverage row this session", async
       // deliberately no coverage row for BTC this session
     });
     await assert.rejects(
-      () => handle("record", ["BTC", "--score", "1.0", "--confidence", "0"]),
+      () => handle("record", ["BTC", "--metric", "score=1.0", "--metric", "confidence=0"]),
       (e: Error & { code?: string }) => e.code === "NO_COVERAGE",
     );
   });
@@ -199,30 +200,30 @@ test("NO_COVERAGE for a rostered asset with no coverage row this session", async
 test("NOT_FOUND for a symbol not on the roster", async () => {
   await withHarness(async () => {
     await assert.rejects(
-      () => handle("record", ["NOSUCH", "--score", "1.0", "--confidence", "0"]),
+      () => handle("record", ["NOSUCH", "--metric", "score=1.0", "--metric", "confidence=0"]),
       (e: Error & { code?: string }) => e.code === "NOT_FOUND",
     );
   });
 });
 
-// See regime.test.ts: parseArgs cannot take `--score -1.5`, so the bearish half
-// of the scale is only reachable through the `=` form documented in the README.
-test("--score=-1.5 records a bearish screen and does not flag", async () => {
+// See macro.test.ts: `--metric score=-1.5` is one token, so the bearish half
+// of the scale survives parseArgs in the plain space-separated form.
+test("--metric score=-1.5 records a bearish screen and does not flag", async () => {
   await withHarness(async (file) => {
     withDb(file, (db) => {
       const asset = addAsset(db, "BTC", "crypto", null, null, NOW);
       upsertCoverage(db, DATE, [{ asset_id: asset.id, values: stubCoverage(100) }]);
     });
 
-    const result = (await handle("record", ["BTC", "--score=-1.5", "--confidence=0.5"])) as {
-      score: number;
+    const result = (await handle("record", ["BTC", "--metric", "score=-1.5", "--metric", "confidence=0.5"])) as {
+      metrics: Record<string, number>;
       flagged: boolean;
     };
-    assert.equal(result.score, -1.5);
+    assert.equal(result.metrics["score"], -1.5);
     assert.equal(result.flagged, false);
     withDb(file, (db) => {
-      const rows = listScreen(db, DATE, {}) as { score: number }[];
-      assert.equal(rows[0]!.score, -1.5, "the negative reached the database intact");
+      const rows = listScreen(db, DATE, {}) as { metrics: Record<string, number> }[];
+      assert.equal(rows[0]!.metrics["score"], -1.5, "the negative reached the database intact");
     });
   });
 });

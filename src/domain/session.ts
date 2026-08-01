@@ -1,12 +1,12 @@
 import { JanusError } from "../output.ts";
 
-export const PHASES = ["regime", "cluster_read", "coverage", "screen", "score"] as const;
+export const PHASES = ["macro", "cluster_read", "coverage", "screen", "score"] as const;
 export type Phase = (typeof PHASES)[number];
 
 export type SessionRow = {
   session_date: string;
   opened_at: string;
-  regime_at: string | null;
+  macro_at: string | null;
   cluster_read_at: string | null;
   coverage_at: string | null;
   screen_at: string | null;

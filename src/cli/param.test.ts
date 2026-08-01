@@ -26,14 +26,15 @@ function freshDbFile(): string {
   const db = openDb(file);
   migrate(db);
   ensureSession(db, DATE, NOW);
-  for (const p of ["regime", "cluster_read", "coverage", "screen"] as const) stampPhase(db, DATE, p, NOW);
+  for (const p of ["macro", "cluster_read", "coverage", "screen"] as const) stampPhase(db, DATE, p, NOW);
   upsertMarkets(db, [
     { symbol: "BTC", market_id: 1, market_type: "perp", status: "active", price_decimals: 1, size_decimals: 5, listed_at: "2025-01-01" },
   ], NOW);
   // Deliberately unclustered: this is the asset that was stuck on DEFAULT_PARAMS
   // forever while global_param was unwritable.
   const asset = addAsset(db, "BTC", "crypto", null, null, NOW);
-  recordScreen(db, DATE, asset.id, { score: 1.5, confidence: 0, threshold: 1, flagged: true, rationale: null }, NOW);
+  recordScreen(db, DATE, asset.id,
+    { flagged: true, rationale: null, metrics: { score: 1.5, confidence: 0 }, results: { threshold: 1 } }, NOW);
   db.close();
   return file;
 }
@@ -95,21 +96,21 @@ test("a global param reaches the scoring decision for an unclustered asset", asy
     // dilutes catalyst. Defaults: (1*2 + 1*0)/2 = 1.
     const args = ["BTC", "--factor", "catalyst=2", "--factor", "trend=0"];
     const before = (await score("record", args)) as {
-      factors: Record<string, { weight: number }>;
-      d: number;
+      results: Record<string, number>;
+      strength: number;
     };
-    assert.equal(before.factors["trend"]!.weight, 1.0, "default w_trend");
-    assert.equal(before.d, 1.0);
+    assert.equal(before.results["w_trend"], 1.0, "default w_trend");
+    assert.equal(before.strength, 1.0);
 
     await handle("set", ["w_trend", "3"]);
 
     // (1*2 + 3*0)/4 = 0.5
     const after = (await score("record", args)) as {
-      factors: Record<string, { weight: number }>;
-      d: number;
+      results: Record<string, number>;
+      strength: number;
     };
-    assert.equal(after.factors["trend"]!.weight, 3, "the global rung now feeds deriveScore");
-    assert.equal(after.d, 0.5, "an unclustered asset is no longer stuck on DEFAULT_PARAMS");
+    assert.equal(after.results["w_trend"], 3, "the global rung now feeds deriveScore");
+    assert.equal(after.strength, 0.5, "an unclustered asset is no longer stuck on DEFAULT_PARAMS");
   });
 });
 

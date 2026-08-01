@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { PositionState } from "../../domain/directive.ts";
+import type { OpenPosition, PositionState } from "../../domain/directive.ts";
+import { type Metrics, metricsByEntity, replaceMetrics } from "./metric.ts";
 
 export type QueueEntry = {
   asset_id: number;
@@ -10,13 +11,17 @@ export type QueueEntry = {
 };
 
 export type ScoreRow = {
-  d: number;
-  conv: number;
+  /** The two standardised numbers the directive comes from. Always present, so: columns. */
+  strength: number;
+  conviction: number;
   directive: string;
   queue_reason: string;
   position_state: string;
-  params_json: string;
   rationale: string | null;
+  /** The factors the agent supplied. */
+  metrics: Metrics;
+  /** Everything else the formula concluded, such as the applied weights. */
+  results: Metrics;
 };
 
 /**
@@ -43,7 +48,7 @@ export function scoreQueue(db: DatabaseSync, date: string): QueueEntry[] {
  * Side and open unit count for an asset's open trade, if any. An open trade
  * whose units have all closed (a data state Task 17 is meant to prevent by
  * flipping trade.status to 'closed') must not surface as a live position —
- * deriveDirective treats any non-null side as "in a position", so units=0
+ * a directive formula treats any non-null side as "in a position", so units=0
  * with a side would wrongly unlock HOLD/TRIM/EXIT. Collapse that case to flat.
  */
 export function positionOf(db: DatabaseSync, assetId: number): PositionState {
@@ -59,34 +64,47 @@ export function positionOf(db: DatabaseSync, assetId: number): PositionState {
   return { side: row.direction, units: row.units };
 }
 
+/**
+ * Every open position in the book, for formulas that weigh a decision against
+ * what is already on. Same units=0 collapse as positionOf: a trade whose units
+ * have all closed is not a live position.
+ */
+export function openPositions(db: DatabaseSync): OpenPosition[] {
+  return db
+    .prepare(
+      `SELECT t.asset_id, a.symbol, t.direction AS side, COUNT(u.id) AS units
+       FROM trade t
+       JOIN asset a ON a.id = t.asset_id
+       LEFT JOIN trade_unit u ON u.trade_id = t.id AND u.status = 'open'
+       WHERE t.status = 'open'
+       GROUP BY t.id
+       HAVING units > 0
+       ORDER BY a.symbol`,
+    )
+    .all() as OpenPosition[];
+}
+
 export function recordScore(
   db: DatabaseSync,
   date: string,
   assetId: number,
   row: ScoreRow,
-  factors: Record<string, number>,
-  weights: Record<string, number>,
   now: string,
 ): void {
   db.exec("BEGIN");
   try {
     db.prepare(
-      `INSERT INTO score (session_date, asset_id, d, conv, directive, queue_reason, position_state, params_json, rationale, recorded_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO score (session_date, asset_id, strength, conviction, directive, queue_reason, position_state, rationale, recorded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(session_date, asset_id) DO UPDATE SET
-         d = excluded.d, conv = excluded.conv, directive = excluded.directive,
+         strength = excluded.strength, conviction = excluded.conviction,
+         directive = excluded.directive,
          queue_reason = excluded.queue_reason, position_state = excluded.position_state,
-         params_json = excluded.params_json, rationale = excluded.rationale,
-         recorded_at = excluded.recorded_at`,
-    ).run(date, assetId, row.d, row.conv, row.directive, row.queue_reason, row.position_state, row.params_json, row.rationale, now);
-
-    db.prepare("DELETE FROM score_factor WHERE session_date = ? AND asset_id = ?").run(date, assetId);
-    const stmt = db.prepare(
-      "INSERT INTO score_factor (session_date, asset_id, key, value, weight) VALUES (?, ?, ?, ?, ?)",
-    );
-    for (const [key, value] of Object.entries(factors)) {
-      stmt.run(date, assetId, key, value, weights[key] ?? 0);
-    }
+         rationale = excluded.rationale, recorded_at = excluded.recorded_at`,
+    ).run(date, assetId, row.strength, row.conviction, row.directive, row.queue_reason, row.position_state, row.rationale, now);
+    const scope = { session_date: date, asset_id: assetId };
+    replaceMetrics(db, "score_metric", scope, row.metrics);
+    replaceMetrics(db, "score_result", scope, row.results);
     db.exec("COMMIT");
   } catch (e) {
     db.exec("ROLLBACK");
@@ -99,19 +117,14 @@ export function listScores(db: DatabaseSync, date: string): unknown[] {
     .prepare(
       `SELECT a.symbol, a.class, s.* FROM score s
        JOIN asset a ON a.id = s.asset_id
-       WHERE s.session_date = ? ORDER BY ABS(s.d) DESC, a.symbol`,
+       WHERE s.session_date = ? ORDER BY ABS(s.strength) DESC, a.symbol`,
     )
-    .all(date) as (ScoreRow & { asset_id: number; symbol: string })[];
-
-  const factorRows = db
-    .prepare("SELECT asset_id, key, value, weight FROM score_factor WHERE session_date = ?")
-    .all(date) as { asset_id: number; key: string; value: number; weight: number }[];
-
-  return scores.map((s) => {
-    const factors: Record<string, { value: number; weight: number }> = {};
-    for (const f of factorRows) {
-      if (f.asset_id === s.asset_id) factors[f.key] = { value: f.value, weight: f.weight };
-    }
-    return { ...s, factors };
-  });
+    .all(date) as { asset_id: number }[];
+  const metrics = metricsByEntity(db, "score_metric", "asset_id", date);
+  const results = metricsByEntity(db, "score_result", "asset_id", date);
+  return scores.map((s) => ({
+    ...s,
+    metrics: metrics.get(s.asset_id) ?? {},
+    results: results.get(s.asset_id) ?? {},
+  }));
 }

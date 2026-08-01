@@ -95,27 +95,57 @@ test("the full daily pipeline runs end to end", async () => {
   const outOfOrder = await janus("coverage", "run");
   assert.equal(outOfOrder.code, 1);
   assert.equal(outOfOrder.body.error.code, "PHASE_ORDER");
-  assert.match(outOfOrder.body.error.message, /regime/);
+  assert.match(outOfOrder.body.error.message, /macro/);
 
-  const regime = await janus(
-    "regime", "record", "--state", "RISK_ON", "--score", "1.5",
-    "--confidence", "0.5", "--summary", "breadth improving", "--metric", "vix=14.2",
+  const macro = await janus(
+    "macro", "record", "--state", "RISK_ON", "--metric", "score=1.5",
+    "--metric", "confidence=0.5", "--summary", "breadth improving", "--metric", "vix=14.2",
   );
-  assert.equal(regime.body.ok, true, JSON.stringify(regime.body));
+  assert.equal(macro.body.ok, true, JSON.stringify(macro.body));
   // A cluster already exists (majors), so cluster_read is NOT auto-stamped here.
-  assert.deepEqual(regime.body.data.stamped, ["regime"]);
+  assert.deepEqual(macro.body.data.stamped, ["macro"]);
+  // score/confidence are metrics, sitting alongside whatever --metric supplied.
+  assert.deepEqual(macro.body.data.metrics, { confidence: 0.5, score: 1.5, vix: 14.2 });
+  // …and what the read concluded from them lands in the result table.
+  // tilt = 1.5 * (0.5/2) = 0.375; risk_budget = 0.5 + 0.25*0.375.
+  assert.deepEqual(macro.body.data.results, { tilt: 0.375, risk_budget: 0.59375 });
 
-  const clusterRead = await janus("cluster-read", "record", "majors", "--bias", "1.0", "--judgement", "intact");
-  assert.equal(clusterRead.body.ok, true);
+  const clusterRead = await janus(
+    "cluster", "record", "majors", "--metric", "bias=1.0",
+    "--metric", "judgement=intact", "--metric", "breadth=0.7",
+  );
+  assert.equal(clusterRead.body.ok, true, JSON.stringify(clusterRead.body));
+
+  const reads = await janus("cluster", "reads");
+  assert.deepEqual(
+    reads.body.data.reads[0].metrics,
+    { bias: 1.0, breadth: 0.7, judgement: "intact" },
+  );
+  // tilt = (1*1.0 + 0.5*0.375) / 1.5; both readings lean the same way, so aligned.
+  assert.deepEqual(reads.body.data.reads[0].results, { tilt: 0.7916666666666666, aligned: 1 });
 
   const coverage = await janus("coverage", "run");
   assert.equal(coverage.body.ok, true, JSON.stringify(coverage.body));
   assert.equal(coverage.body.data.covered, 1);
   assert.equal(coverage.body.data.phase_complete, true);
 
-  const screen = await janus("screen", "record", "XPL", "--score", "1.5", "--confidence", "0.5");
+  const screen = await janus(
+    "screen", "record", "XPL", "--metric", "score=1.5", "--metric", "confidence=0.5", "--metric", "rvol=2.1",
+  );
   assert.equal(screen.body.ok, true, JSON.stringify(screen.body));
   assert.equal(screen.body.data.flagged, true);
+
+  const screens = await janus("screen", "list");
+  assert.deepEqual(
+    screens.body.data.screens[0].metrics,
+    { confidence: 0.5, rvol: 2.1, score: 1.5 },
+    "what was observed",
+  );
+  assert.deepEqual(
+    screens.body.data.screens[0].results,
+    { threshold: 1 },
+    "the threshold in force, snapshotted by the formula that used it",
+  );
 
   const queue = await janus("score", "queue");
   assert.equal(queue.body.data.count, 1);
@@ -127,10 +157,26 @@ test("the full daily pipeline runs end to end", async () => {
     "--factor", "secular=2", "--factor", "crowding=-2",
   );
   assert.equal(scored.body.ok, true, JSON.stringify(scored.body));
-  assert.equal(scored.body.data.d, 2);
-  assert.equal(scored.body.data.conv, 10);
-  assert.equal(scored.body.data.directive, "INITIATE");
+  assert.equal(scored.body.data.strength, 2);
+  assert.equal(scored.body.data.conviction, 10);
+  assert.equal(scored.body.data.directive, "NONE", "the directive is stubbed for now");
   assert.equal(scored.body.data.position, "flat");
+  // The factors exactly as the agent gave them…
+  assert.deepEqual(scored.body.data.metrics, {
+    catalyst: 2, trend: 2, secular: 2, crowding: -2,
+  });
+  // …and everything the formula concluded, including how the session's own
+  // macro and cluster reads line up with the decision.
+  assert.deepEqual(scored.body.data.results, {
+    w_catalyst: 1, w_trend: 1, w_secular: 1, w_crowding: -1,
+    macro_aligned: 1, cluster_aligned: 1,
+  });
+
+  // strength and conviction are columns, so a score list can sort and filter on
+  // them without touching the result table.
+  const scores = await janus("score", "list");
+  assert.equal(scores.body.data.scores[0].strength, 2);
+  assert.equal(scores.body.data.scores[0].conviction, 10);
 
   const status = await janus("session", "status");
   assert.equal(status.body.data.next_phase, null, "every phase should be complete");
@@ -155,7 +201,7 @@ test("scoring a screened-but-unflagged asset is refused with NOT_FLAGGED", async
   const coverage = await janus("coverage", "run");
   assert.equal(coverage.body.ok, true, JSON.stringify(coverage.body));
 
-  const screen = await janus("screen", "record", "CC", "--score", "0.2", "--confidence", "0.5");
+  const screen = await janus("screen", "record", "CC", "--metric", "score=0.2", "--metric", "confidence=0.5");
   assert.equal(screen.body.ok, true, JSON.stringify(screen.body));
   assert.equal(screen.body.data.flagged, false);
 
@@ -164,7 +210,7 @@ test("scoring a screened-but-unflagged asset is refused with NOT_FLAGGED", async
   assert.equal(res.body.error.code, "NOT_FLAGGED");
 });
 
-test("a trade changes the directive on the next scoring run", async () => {
+test("an open position reaches the next scoring run", async () => {
   const opened = await janus(
     "trade", "open", "XPL", "--direction", "long",
     "--price", "100", "--stop", "90", "--risk", "100", "--notional", "1000",
@@ -179,14 +225,15 @@ test("a trade changes the directive on the next scoring run", async () => {
   assert.equal(conflict.code, 1);
   assert.equal(conflict.body.error.code, "POSITION_CONFLICT");
 
-  // Re-scoring now sees an open position, so the directive is position-aware.
+  // Re-scoring now sees an open position: it is snapshotted onto the row and
+  // handed to deriveScore, which will act on it once the ladder is written.
   const rescored = await janus(
     "score", "record", "XPL", "--force",
     "--factor", "catalyst=2", "--factor", "trend=2",
     "--factor", "secular=2", "--factor", "crowding=-2",
   );
   assert.equal(rescored.body.data.position, "long:1");
-  assert.equal(rescored.body.data.directive, "ADD");
+  assert.equal(rescored.body.data.directive, "NONE");
 
   const addedUnit = await janus("trade", "add-unit", id, "--price", "110", "--stop", "100", "--risk", "100", "--notional", "1100");
   assert.equal(addedUnit.body.data.summary.open_units, 2);

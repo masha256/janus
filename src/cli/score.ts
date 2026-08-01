@@ -3,12 +3,13 @@ import { openDb } from "../db/connect.ts";
 import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
 import { requireAssetBySymbol } from "../db/repo/asset.ts";
 import { getClusterParams, getGlobalParams } from "../db/repo/cluster.ts";
-import { scoreQueue, positionOf, recordScore, listScores } from "../db/repo/score.ts";
-import { listCoverage } from "../db/repo/coverage.ts";
-import { listScreen } from "../db/repo/screen.ts";
+import { scoreQueue, positionOf, openPositions, recordScore, listScores } from "../db/repo/score.ts";
+import { getMacro, getClusterRead } from "../db/repo/phase.ts";
+import { listCoverage, getCoverage } from "../db/repo/coverage.ts";
+import { listScreen, getScreen } from "../db/repo/screen.ts";
 import { resolveParams } from "../domain/params.ts";
 import { deriveScore } from "../domain/score.ts";
-import { deriveDirective, formatPosition } from "../domain/directive.ts";
+import { formatPosition } from "../domain/directive.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
 import { pairs, readText, required, unknownVerb } from "./args.ts";
 import { JanusError } from "../output.ts";
@@ -67,17 +68,34 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
       }
 
       const params = resolveParams(getClusterParams(db, asset.cluster_id), getGlobalParams(db));
-      const { d, conv, applied } = deriveScore(factors, params);
+      // Everything the session already concluded, top down, plus the whole book.
+      const context = {
+        macro: getMacro(db, session.session_date),
+        cluster: asset.cluster_id === null
+          ? null
+          : getClusterRead(db, session.session_date, asset.cluster_id),
+        screen: getScreen(db, session.session_date, asset.id),
+        positions: openPositions(db),
+        asset: {
+          symbol: asset.symbol,
+          class: asset.class,
+          cluster_id: asset.cluster_id,
+          coverage: getCoverage(db, session.session_date, asset.id),
+        },
+      };
+
+      const { strength, conviction, directive, results } = deriveScore(factors, context, params);
       const position = positionOf(db, asset.id);
-      const directive = deriveDirective(d, conv, position, params);
 
       recordScore(db, session.session_date, asset.id, {
-        d, conv, directive,
+        strength, conviction, directive,
         queue_reason: entry.queue_reason,
         position_state: formatPosition(position),
-        params_json: JSON.stringify(params),
         rationale: readText(values.rationale) ?? null,
-      }, factors, applied, now);
+        // The factors as given; everything else the formula concluded alongside.
+        metrics: factors,
+        results,
+      }, now);
 
       const scored = (listScores(db, session.session_date) as unknown[]).length;
       const complete = scored >= queue.length;
@@ -86,12 +104,11 @@ export async function handle(verb: string | undefined, argv: string[]): Promise<
       return {
         session_date: session.session_date,
         symbol: asset.symbol,
-        d, conv, directive,
+        strength, conviction, directive,
         position: formatPosition(position),
         queue_reason: entry.queue_reason,
-        factors: Object.fromEntries(
-          Object.entries(factors).map(([k, v]) => [k, { value: v, weight: applied[k] ?? 0 }]),
-        ),
+        metrics: factors,
+        results,
         scored, of: queue.length,
         phase_complete: complete,
       };

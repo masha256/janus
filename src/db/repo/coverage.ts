@@ -35,6 +35,21 @@ export function upsertCoverage(
   }
 }
 
+/**
+ * One asset's coverage row for the session, or null if it was never fetched.
+ * Selecting COLUMNS rather than * is what makes the CoverageValues cast honest.
+ */
+export function getCoverage(
+  db: DatabaseSync,
+  date: string,
+  assetId: number,
+): CoverageValues | null {
+  const row = db
+    .prepare(`SELECT ${COLUMNS.join(", ")} FROM coverage WHERE session_date = ? AND asset_id = ?`)
+    .get(date, assetId);
+  return (row as CoverageValues | undefined) ?? null;
+}
+
 export function listCoverage(db: DatabaseSync, date: string, symbols?: string[]): unknown[] {
   const filter = symbols === undefined ? "" : `AND a.symbol IN (${symbols.map(() => "?").join(",")})`;
   return db

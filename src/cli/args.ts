@@ -77,6 +77,30 @@ export function csv(raw: string | undefined): string[] | undefined {
   return parts;
 }
 
+/**
+ * `--metric` values: numeric when they parse as a number, free text otherwise
+ * (`--metric judgement="rolling over"`). Text lands in the metric table's
+ * value_text; numbers in value_num.
+ */
+export function metricPairs(
+  raw: string[] | undefined,
+  flag: string,
+): Record<string, number | string> {
+  const out: Record<string, number | string> = {};
+  for (const item of raw ?? []) {
+    const eq = item.indexOf("=");
+    if (eq <= 0) {
+      throw new JanusError("VALIDATION", `--${flag} must be key=value, got ${item}`);
+    }
+    const value = item.slice(eq + 1);
+    // "" parses as 0 in JS; an empty metric is a mistake, not a zero.
+    out[item.slice(0, eq)] = value.trim() !== "" && Number.isFinite(Number(value))
+      ? Number(value)
+      : value;
+  }
+  return out;
+}
+
 /** `["catalyst=1.5","trend=-0.5"]` → { catalyst: 1.5, trend: -0.5 } */
 export function pairs(raw: string[] | undefined, flag: string): Record<string, number> {
   const out: Record<string, number> = {};
