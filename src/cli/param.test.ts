@@ -10,11 +10,15 @@ import { upsertMarkets } from "../db/repo/market.ts";
 import { addAsset, requireAssetBySymbol } from "../db/repo/asset.ts";
 import { recordScreen } from "../db/repo/screen.ts";
 import { DEFAULT_PARAMS } from "../domain/params.ts";
+import { todayNY } from "../domain/session.ts";
 import { handle } from "./param.ts";
 import { handle as score } from "./score.ts";
 
 const NOW = "2026-07-31T12:00:00Z";
-const DATE = "2026-07-31";
+// score.ts's resolveSession resolves an omitted --date via todayNY() against
+// the real clock, so fixtures must be seeded under that same date or a day
+// rollover leaves assertPhaseOrder looking at an unstamped session.
+const DATE = todayNY();
 
 function freshDbFile(): string {
   const dir = mkdtempSync(join(tmpdir(), "janus-param-test-"));

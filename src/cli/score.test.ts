@@ -10,14 +10,17 @@ import { ensureSession, getSession, stampPhase } from "../db/repo/session.ts";
 import { upsertMarkets } from "../db/repo/market.ts";
 import { addAsset, requireAssetBySymbol } from "../db/repo/asset.ts";
 import { recordScreen } from "../db/repo/screen.ts";
-import { nextPhase } from "../domain/session.ts";
+import { nextPhase, todayNY } from "../domain/session.ts";
 import { resolveParams } from "../domain/params.ts";
 import { deriveScore } from "../domain/score.ts";
 import { deriveDirective } from "../domain/directive.ts";
 import { handle } from "./score.ts";
 
 const NOW = "2026-07-31T12:00:00Z";
-const DATE = "2026-07-31";
+// score.ts's resolveSession resolves an omitted --date via todayNY() against
+// the real clock, so fixtures must be seeded under that same date or a day
+// rollover leaves assertPhaseOrder looking at an unstamped session.
+const DATE = todayNY();
 
 // score record opens its own db via JANUS_DB, so a real temp file (not
 // :memory:) is needed to observe what it wrote. Phase order requires regime,

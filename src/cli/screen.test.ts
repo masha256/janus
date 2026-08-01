@@ -12,12 +12,15 @@ import { addAsset } from "../db/repo/asset.ts";
 import { addCluster, setClusterParam } from "../db/repo/cluster.ts";
 import { upsertCoverage } from "../db/repo/coverage.ts";
 import { listScreen } from "../db/repo/screen.ts";
-import { nextPhase } from "../domain/session.ts";
+import { nextPhase, todayNY } from "../domain/session.ts";
 import type { CoverageValues } from "../domain/coverage.ts";
 import { handle } from "./screen.ts";
 
 const NOW = "2026-07-31T12:00:00Z";
-const DATE = "2026-07-31";
+// screen.ts's resolveSession resolves an omitted --date via todayNY() against
+// the real clock, so fixtures must be seeded under that same date or a day
+// rollover leaves assertPhaseOrder looking at an unstamped session.
+const DATE = todayNY();
 
 /** A minimal coverage row: only `close` matters to screening, everything else is filler. */
 const stubCoverage = (close: number): CoverageValues => ({

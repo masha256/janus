@@ -10,11 +10,15 @@ import { ensureSession, getSession, stampPhase } from "../db/repo/session.ts";
 import { upsertMarkets } from "../db/repo/market.ts";
 import { addAsset } from "../db/repo/asset.ts";
 import { listCoverage } from "../db/repo/coverage.ts";
-import { nextPhase } from "../domain/session.ts";
+import { nextPhase, todayNY } from "../domain/session.ts";
 import { handle } from "./coverage.ts";
 
 const NOW = "2026-07-31T12:00:00Z";
-const DATE = "2026-07-31";
+// resolveSession (see coverage.ts's handle) resolves an omitted --date via
+// todayNY() against the real clock, not this file's NOW. Fixtures must be
+// seeded under the same date the handler will actually resolve, or a day
+// rollover makes assertPhaseOrder see a brand-new, unstamped session.
+const DATE = todayNY();
 
 const fixture = (name: string): Buffer =>
   readFileSync(new URL(`../../test/fixtures/${name}.json`, import.meta.url));
