@@ -1,0 +1,236 @@
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { createServer } from "node:http";
+import { promisify } from "node:util";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+const run = promisify(execFile);
+const dir = mkdtempSync(join(tmpdir(), "janus-e2e-"));
+const DB = join(dir, "test.db");
+const CLI = new URL("./cli.ts", import.meta.url).pathname;
+let server;
+let baseUrl;
+/**
+ * Serves the recorded fixtures so nothing in the daily pipeline touches the
+ * network. The fixtures only cover one asset's worth of data: `orderBooks`
+ * (the market catalog `market sync` reads) lists XPL/CC/DIA, while
+ * `orderBookDetails` and `candles` carry BTC's numbers. The stub — like the
+ * one in cli/coverage.test.ts — matches on path only, so whichever symbol we
+ * add to the roster (XPL, since that's what `market sync` will actually
+ * find) gets served BTC's snapshot and candles regardless of market_id. That
+ * asymmetry is in the fixtures as recorded; it doesn't matter here because
+ * neither parseSnapshot nor parseBars checks the requested market_id.
+ */
+before(async () => {
+    const fixture = (name) => readFileSync(new URL(`../test/fixtures/${name}.json`, import.meta.url), "utf8");
+    server = createServer((req, res) => {
+        const path = (req.url ?? "").split("?")[0];
+        res.setHeader("content-type", "application/json");
+        if (path === "/api/v1/orderBooks")
+            return void res.end(fixture("orderBooks"));
+        if (path === "/api/v1/orderBookDetails")
+            return void res.end(fixture("orderBookDetails"));
+        if (path === "/api/v1/candles")
+            return void res.end(fixture("candles"));
+        res.statusCode = 404;
+        res.end("{}");
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const addr = server.address();
+    baseUrl = `http://127.0.0.1:${typeof addr === "object" && addr !== null ? addr.port : 0}`;
+});
+after(() => {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+});
+/** Runs the CLI and returns raw streams; help and --human are not JSON. */
+async function janusRaw(...args) {
+    const env = { ...process.env, JANUS_DB: DB, JANUS_LIGHTER_URL: baseUrl };
+    const parse = (out) => {
+        try {
+            return JSON.parse(out);
+        }
+        catch {
+            return undefined;
+        }
+    };
+    try {
+        const { stdout, stderr } = await run(process.execPath, [CLI, ...args], { env });
+        return { code: 0, stdout, stderr, body: parse(stdout) };
+    }
+    catch (e) {
+        const err = e;
+        const stdout = err.stdout ?? "";
+        return { code: err.code ?? 1, stdout, stderr: err.stderr ?? "", body: parse(stdout) };
+    }
+}
+/** Runs the CLI and returns the parsed envelope plus the exit code. */
+async function janus(...args) {
+    const { code, stdout } = await janusRaw(...args);
+    return { code, body: JSON.parse(stdout || "{}") };
+}
+test("every command emits a parseable envelope", async () => {
+    const { code, body } = await janus("init");
+    assert.equal(code, 0);
+    assert.equal(body.ok, true);
+    assert.equal(body.data.schema_version, 1);
+});
+test("--help prints usage as plain text and exits 0", async () => {
+    const { code, body, stdout } = await janusRaw("--help");
+    assert.equal(code, 0);
+    assert.equal(body, undefined, "help is text, not an envelope");
+    assert.match(stdout, /Usage: janus/);
+    for (const noun of ["macro", "cluster", "coverage", "screen", "score", "trade"]) {
+        assert.match(stdout, new RegExp(`\\n  ${noun}`), `${noun} is listed`);
+    }
+});
+test("every noun and verb carries its own help", async () => {
+    const noun = await janusRaw("macro", "--help");
+    assert.equal(noun.code, 0);
+    assert.match(noun.stdout, /record/);
+    assert.match(noun.stdout, /reads/);
+    const verb = await janusRaw("macro", "record", "--help");
+    assert.equal(verb.code, 0);
+    for (const flag of ["--state", "--summary", "--metric", "--date", "--force", "--human"]) {
+        assert.match(verb.stdout, new RegExp(flag.replace("-", "\\-")), `${flag} is documented`);
+    }
+});
+test("an unknown command fails with VALIDATION and exit 1", async () => {
+    const { code, body } = await janus("nonsense");
+    assert.equal(code, 1);
+    assert.equal(body.ok, false);
+    assert.equal(body.error.code, "VALIDATION");
+});
+test("the full daily pipeline runs end to end", async () => {
+    const synced = await janus("market", "sync");
+    assert.equal(synced.body.ok, true, JSON.stringify(synced.body));
+    assert.equal(synced.body.data.synced, 3, "orderBooks fixture lists 3 markets");
+    await janus("cluster", "add", "majors", "--name", "Majors");
+    // orderBooks only carries XPL/CC/DIA (no BTC), so the roster addition has
+    // to target a symbol market sync actually populated.
+    const added = await janus("asset", "add", "XPL", "--class", "crypto", "--cluster", "majors");
+    assert.equal(added.body.ok, true, JSON.stringify(added.body));
+    // Scoring before screening must be refused.
+    const queued = await janus("score", "queue");
+    assert.equal(queued.body.ok, true, "queue is a read and is always allowed");
+    assert.equal(queued.body.data.count, 0);
+    // Screening depends on both the reads and coverage, none of which have run.
+    const outOfOrder = await janus("screen", "record", "XPL", "--metric", "score=1", "--metric", "confidence=1");
+    assert.equal(outOfOrder.code, 1);
+    assert.equal(outOfOrder.body.error.code, "PHASE_ORDER");
+    assert.match(outOfOrder.body.error.message, /macro/);
+    // Coverage, though, depends on nothing: it runs before any read exists and
+    // stamps its own phase. The pipeline below then re-runs it in place.
+    const early = await janus("coverage", "run");
+    assert.equal(early.body.ok, true, JSON.stringify(early.body));
+    assert.equal(early.body.data.phase_complete, true);
+    const macro = await janus("macro", "record", "--state", "RISK_ON", "--metric", "score=1.5", "--metric", "confidence=0.5", "--summary", "breadth improving", "--metric", "vix=14.2");
+    assert.equal(macro.body.ok, true, JSON.stringify(macro.body));
+    // A cluster already exists (majors), so cluster_read is NOT auto-stamped here.
+    assert.deepEqual(macro.body.data.stamped, ["macro"]);
+    // score/confidence are metrics, sitting alongside whatever --metric supplied.
+    assert.deepEqual(macro.body.data.metrics, { confidence: 0.5, score: 1.5, vix: 14.2 });
+    // …and what the read concluded from them lands in the result table.
+    // tilt = 1.5 * (0.5/2) = 0.375; risk_budget = 0.5 + 0.25*0.375.
+    assert.deepEqual(macro.body.data.results, { tilt: 0.375, risk_budget: 0.59375 });
+    const clusterRead = await janus("cluster", "record", "majors", "--metric", "bias=1.0", "--metric", "judgement=intact", "--metric", "breadth=0.7");
+    assert.equal(clusterRead.body.ok, true, JSON.stringify(clusterRead.body));
+    const reads = await janus("cluster", "reads");
+    assert.deepEqual(reads.body.data.reads[0].metrics, { bias: 1.0, breadth: 0.7, judgement: "intact" });
+    // tilt = (1*1.0 + 0.5*0.375) / 1.5; both readings lean the same way, so aligned.
+    assert.deepEqual(reads.body.data.reads[0].results, { tilt: 0.7916666666666666, aligned: 1 });
+    const coverage = await janus("coverage", "run");
+    assert.equal(coverage.body.ok, true, JSON.stringify(coverage.body));
+    assert.equal(coverage.body.data.covered, 1);
+    assert.equal(coverage.body.data.phase_complete, true);
+    const screen = await janus("screen", "record", "XPL", "--metric", "score=1.5", "--metric", "confidence=0.5", "--metric", "rvol=2.1");
+    assert.equal(screen.body.ok, true, JSON.stringify(screen.body));
+    assert.equal(screen.body.data.flagged, true);
+    const screens = await janus("screen", "list");
+    assert.deepEqual(screens.body.data.screens[0].metrics, { confidence: 0.5, rvol: 2.1, score: 1.5 }, "what was observed");
+    assert.deepEqual(screens.body.data.screens[0].results, { threshold: 1 }, "the threshold in force, snapshotted by the formula that used it");
+    const queue = await janus("score", "queue");
+    assert.equal(queue.body.data.count, 1);
+    assert.equal(queue.body.data.queue[0].queue_reason, "flagged");
+    const scored = await janus("score", "record", "XPL", "--factor", "catalyst=2", "--factor", "trend=2", "--factor", "secular=2", "--factor", "crowding=-2");
+    assert.equal(scored.body.ok, true, JSON.stringify(scored.body));
+    assert.equal(scored.body.data.strength, 2);
+    assert.equal(scored.body.data.conviction, 10);
+    assert.equal(scored.body.data.directive, "NONE", "the directive is stubbed for now");
+    assert.equal(scored.body.data.position, "flat");
+    // The factors exactly as the agent gave them…
+    assert.deepEqual(scored.body.data.metrics, {
+        catalyst: 2, trend: 2, secular: 2, crowding: -2,
+    });
+    // …and everything the formula concluded, including how the session's own
+    // macro and cluster reads line up with the decision.
+    assert.deepEqual(scored.body.data.results, {
+        w_catalyst: 1, w_trend: 1, w_secular: 1, w_crowding: -1,
+        macro_aligned: 1, cluster_aligned: 1,
+    });
+    // strength and conviction are columns, so a score list can sort and filter on
+    // them without touching the result table.
+    const scores = await janus("score", "list");
+    assert.equal(scores.body.data.scores[0].strength, 2);
+    assert.equal(scores.body.data.scores[0].conviction, 10);
+    const status = await janus("session", "status");
+    assert.equal(status.body.data.next_phase, null, "every phase should be complete");
+    // The same session, rendered for a human: text, no envelope, still exit 0.
+    const text = await janusRaw("score", "list", "--human");
+    assert.equal(text.code, 0);
+    assert.equal(text.body, undefined, "--human output is not JSON");
+    assert.match(text.stdout, /session_date: /);
+    assert.match(text.stdout, /symbol\s+class/, "the scores render as a table");
+    assert.match(text.stdout, /XPL/);
+});
+test("a human-mode failure goes to stderr, not stdout, and still exits 1", async () => {
+    const { code, stdout, stderr } = await janusRaw("score", "record", "NOSUCH", "--factor", "a=1", "--human");
+    assert.equal(code, 1);
+    assert.equal(stdout, "", "nothing on stdout to mistake for a result");
+    assert.match(stderr, /^janus: .*\(NOT_FOUND\)$/m);
+});
+test("scoring against a nonexistent session is refused", async () => {
+    const res = await janus("score", "record", "XPL", "--factor", "catalyst=1", "--date", "1999-01-01");
+    assert.equal(res.code, 1);
+    assert.equal(res.body.error.code, "SESSION_MISSING");
+});
+test("scoring a screened-but-unflagged asset is refused with NOT_FLAGGED", async () => {
+    // A real current session already exists from the pipeline test above.
+    // Add a second roster asset and cover it, but screen it below the flag
+    // threshold (rather than skipping screen entirely) so screen_at stays
+    // reachable — scoreQueue only pulls flagged rows (or open trades), so an
+    // asset that was screened and came in under threshold is off the queue
+    // without leaving the screen phase looking incomplete.
+    const added = await janus("asset", "add", "CC", "--class", "crypto");
+    assert.equal(added.body.ok, true, JSON.stringify(added.body));
+    const coverage = await janus("coverage", "run");
+    assert.equal(coverage.body.ok, true, JSON.stringify(coverage.body));
+    const screen = await janus("screen", "record", "CC", "--metric", "score=0.2", "--metric", "confidence=0.5");
+    assert.equal(screen.body.ok, true, JSON.stringify(screen.body));
+    assert.equal(screen.body.data.flagged, false);
+    const res = await janus("score", "record", "CC", "--factor", "catalyst=1");
+    assert.equal(res.code, 1);
+    assert.equal(res.body.error.code, "NOT_FLAGGED");
+});
+test("an open position reaches the next scoring run", async () => {
+    const opened = await janus("trade", "open", "XPL", "--direction", "long", "--price", "100", "--stop", "90", "--risk", "100", "--notional", "1000");
+    assert.equal(opened.body.ok, true, JSON.stringify(opened.body));
+    const id = String(opened.body.data.trade.id);
+    const conflict = await janus("trade", "open", "XPL", "--direction", "long", "--price", "100", "--stop", "90", "--risk", "100", "--notional", "1000");
+    assert.equal(conflict.code, 1);
+    assert.equal(conflict.body.error.code, "POSITION_CONFLICT");
+    // Re-scoring now sees an open position: it is snapshotted onto the row and
+    // handed to deriveScore, which will act on it once the ladder is written.
+    const rescored = await janus("score", "record", "XPL", "--force", "--factor", "catalyst=2", "--factor", "trend=2", "--factor", "secular=2", "--factor", "crowding=-2");
+    assert.equal(rescored.body.data.position, "long:1");
+    assert.equal(rescored.body.data.directive, "NONE");
+    const addedUnit = await janus("trade", "add-unit", id, "--price", "110", "--stop", "100", "--risk", "100", "--notional", "1100");
+    assert.equal(addedUnit.body.data.summary.open_units, 2);
+    assert.equal(addedUnit.body.data.summary.total_notional, 2100);
+    const exited = await janus("trade", "exit", id, "--price", "130");
+    assert.equal(exited.body.data.trade_status, "closed");
+    assert.equal(exited.body.data.summary.open_units, 0);
+    assert.ok(exited.body.data.summary.r_multiple > 0);
+});

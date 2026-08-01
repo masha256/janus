@@ -50,16 +50,32 @@ after(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/** Runs the CLI and returns raw streams; help and --human are not JSON. */
+async function janusRaw(
+  ...args: string[]
+): Promise<{ code: number; stdout: string; stderr: string; body?: any }> {
+  const env = { ...process.env, JANUS_DB: DB, JANUS_LIGHTER_URL: baseUrl };
+  const parse = (out: string): any => {
+    try {
+      return JSON.parse(out);
+    } catch {
+      return undefined;
+    }
+  };
+  try {
+    const { stdout, stderr } = await run(process.execPath, [CLI, ...args], { env });
+    return { code: 0, stdout, stderr, body: parse(stdout) };
+  } catch (e) {
+    const err = e as { code?: number; stdout?: string; stderr?: string };
+    const stdout = err.stdout ?? "";
+    return { code: err.code ?? 1, stdout, stderr: err.stderr ?? "", body: parse(stdout) };
+  }
+}
+
 /** Runs the CLI and returns the parsed envelope plus the exit code. */
 async function janus(...args: string[]): Promise<{ code: number; body: any }> {
-  const env = { ...process.env, JANUS_DB: DB, JANUS_LIGHTER_URL: baseUrl };
-  try {
-    const { stdout } = await run(process.execPath, [CLI, ...args], { env });
-    return { code: 0, body: JSON.parse(stdout) };
-  } catch (e) {
-    const err = e as { code?: number; stdout?: string };
-    return { code: err.code ?? 1, body: JSON.parse(err.stdout ?? "{}") };
-  }
+  const { code, stdout } = await janusRaw(...args);
+  return { code, body: JSON.parse(stdout || "{}") };
 }
 
 test("every command emits a parseable envelope", async () => {
@@ -67,6 +83,29 @@ test("every command emits a parseable envelope", async () => {
   assert.equal(code, 0);
   assert.equal(body.ok, true);
   assert.equal(body.data.schema_version, 1);
+});
+
+test("--help prints usage as plain text and exits 0", async () => {
+  const { code, body, stdout } = await janusRaw("--help");
+  assert.equal(code, 0);
+  assert.equal(body, undefined, "help is text, not an envelope");
+  assert.match(stdout, /Usage: janus/);
+  for (const noun of ["macro", "cluster", "coverage", "screen", "score", "trade"]) {
+    assert.match(stdout, new RegExp(`\\n  ${noun}`), `${noun} is listed`);
+  }
+});
+
+test("every noun and verb carries its own help", async () => {
+  const noun = await janusRaw("macro", "--help");
+  assert.equal(noun.code, 0);
+  assert.match(noun.stdout, /record/);
+  assert.match(noun.stdout, /reads/);
+
+  const verb = await janusRaw("macro", "record", "--help");
+  assert.equal(verb.code, 0);
+  for (const flag of ["--state", "--summary", "--metric", "--date", "--force", "--human"]) {
+    assert.match(verb.stdout, new RegExp(flag.replace("-", "\\-")), `${flag} is documented`);
+  }
 });
 
 test("an unknown command fails with VALIDATION and exit 1", async () => {
@@ -88,14 +127,23 @@ test("the full daily pipeline runs end to end", async () => {
   assert.equal(added.body.ok, true, JSON.stringify(added.body));
 
   // Scoring before screening must be refused.
-  const early = await janus("score", "queue");
-  assert.equal(early.body.ok, true, "queue is a read and is always allowed");
-  assert.equal(early.body.data.count, 0);
+  const queued = await janus("score", "queue");
+  assert.equal(queued.body.ok, true, "queue is a read and is always allowed");
+  assert.equal(queued.body.data.count, 0);
 
-  const outOfOrder = await janus("coverage", "run");
+  // Screening depends on both the reads and coverage, none of which have run.
+  const outOfOrder = await janus(
+    "screen", "record", "XPL", "--metric", "score=1", "--metric", "confidence=1",
+  );
   assert.equal(outOfOrder.code, 1);
   assert.equal(outOfOrder.body.error.code, "PHASE_ORDER");
   assert.match(outOfOrder.body.error.message, /macro/);
+
+  // Coverage, though, depends on nothing: it runs before any read exists and
+  // stamps its own phase. The pipeline below then re-runs it in place.
+  const early = await janus("coverage", "run");
+  assert.equal(early.body.ok, true, JSON.stringify(early.body));
+  assert.equal(early.body.data.phase_complete, true);
 
   const macro = await janus(
     "macro", "record", "--state", "RISK_ON", "--metric", "score=1.5",
@@ -180,6 +228,21 @@ test("the full daily pipeline runs end to end", async () => {
 
   const status = await janus("session", "status");
   assert.equal(status.body.data.next_phase, null, "every phase should be complete");
+
+  // The same session, rendered for a human: text, no envelope, still exit 0.
+  const text = await janusRaw("score", "list", "--human");
+  assert.equal(text.code, 0);
+  assert.equal(text.body, undefined, "--human output is not JSON");
+  assert.match(text.stdout, /session_date: /);
+  assert.match(text.stdout, /symbol\s+class/, "the scores render as a table");
+  assert.match(text.stdout, /XPL/);
+});
+
+test("a human-mode failure goes to stderr, not stdout, and still exits 1", async () => {
+  const { code, stdout, stderr } = await janusRaw("score", "record", "NOSUCH", "--factor", "a=1", "--human");
+  assert.equal(code, 1);
+  assert.equal(stdout, "", "nothing on stdout to mistake for a result");
+  assert.match(stderr, /^janus: .*\(NOT_FOUND\)$/m);
 });
 
 test("scoring against a nonexistent session is refused", async () => {

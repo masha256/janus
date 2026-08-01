@@ -12,28 +12,61 @@ It is driven two ways: an AI agent runs the five-phase daily pipeline, and a hum
 operator logs trades. Every command prints exactly one JSON object, so the agent side
 needs no screen-scraping.
 
-## Requirements
+## Install
 
-- Node **>= 24** — `node:sqlite` is the only database layer and it is not available
-  earlier. `.npmrc` pins the runtime (`use-node-version=24.18.1`, `engine-strict=true`),
-  so **run everything through pnpm** (`pnpm build`, `pnpm test`,
-  `pnpm exec node src/cli.ts …`). A bare `node` on your PATH may be older and will fail
-  to load `node:sqlite`.
-- pnpm.
-- No runtime dependencies. TypeScript is a dev dependency only; `.ts` sources run
-  directly under Node's type stripping.
+You need **Node 24 or newer** (`node -v`) and access to this repository. Nothing else —
+the build output ships in the repo, so there is no compile step on your machine.
 
 ```
-pnpm install
-pnpm build    # tsc → dist/
-pnpm test     # node:test, no framework, no network
+npm i -g git+ssh://git@github.com/masha256/janus.git
+janus init
+janus --help
 ```
+
+`janus init` creates `~/.janus/janus.db`. That path is fixed, so `janus` reaches the same
+database from any directory.
+
+| | |
+| --- | --- |
+| Update | re-run the `npm i -g` line |
+| Pin a version | append `#v0.1.0` (any tag or commit) to the URL |
+| Uninstall | `npm uninstall -g janus` |
+| Use a different database | set `JANUS_DB` |
+
+If the install fails with `EBADENGINE` or `Unsupported engine`, your Node is too old:
+janus uses `node:sqlite`, which does not exist before 24.
+
+## Working on janus
+
+```
+git clone git@github.com:masha256/janus.git
+cd janus
+npm install
+npm test          # node:test, no framework, no network
+npm run build     # tsc → dist/
+npm link          # optional: `janus` on PATH, pointing at this checkout
+```
+
+One runtime dependency, [commander](https://github.com/tj/commander.js), which parses the
+CLI and generates `--help`. TypeScript is a dev dependency only; `.ts` sources run
+directly under Node's type stripping, so `npm test` needs no build.
+
+**`dist/` is committed on purpose.** It is what makes `npm i -g git+ssh://…` a plain file
+copy — recipients need no TypeScript and no build step, and npm's install-time build hook
+is fragile enough to be worth avoiding. The cost is that a source change is only released
+once you rebuild and commit the output:
+
+```
+npm run build && git add dist && git commit
+```
+
+`.gitattributes` marks `dist/**` as generated, so those diffs stay collapsed in review.
 
 ## Environment
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `JANUS_DB` | `./janus.db` | SQLite file. Created by `janus init`. |
+| `JANUS_DB` | `~/.janus/janus.db` | SQLite file. Created by `janus init`, along with its directory. The default is absolute on purpose, so `janus` reaches the same database from any working directory. |
 | `JANUS_LIGHTER_URL` | `https://mainnet.zklighter.elliot.ai` | Lighter API base. Points the two read-only endpoints at a stub for tests or replay. |
 
 ## Output contract
@@ -47,6 +80,32 @@ Every command writes one JSON object to stdout and nothing else.
 
 Exit code is `0` on success and `1` on error. The `ok` flag and the exit code always
 agree, so either one is sufficient to branch on.
+
+### `--human`
+
+Any command takes `--human`, which drops the envelope and renders the same result as
+text: scalars as `key: value`, lists of records as aligned tables, metric and result bags
+as `k=v` pairs. Errors go to **stderr** as `janus: message (CODE)`, leaving stdout empty,
+and the exit code is unchanged.
+
+```
+$ janus score list --human
+session_date: 2026-08-01
+count: 1
+scores (1):
+  symbol  class   strength  conviction  directive  metrics             results
+  ------  ------  --------  ----------  ---------  ------------------  -------------------
+  XPL     crypto  2         10          NONE       catalyst=2 trend=2  macro_aligned=1 ...
+```
+
+It is a display flag only — JSON stays the default, so nothing an agent parses changes.
+`--help` and `--version` are plain text in both modes.
+
+### Help
+
+`janus --help` lists every command, `janus <command> --help` every verb, and
+`janus <command> <verb> --help` every flag with its meaning. That is generated from the
+command definitions, so it cannot drift from what the parser accepts.
 
 Error codes:
 
@@ -66,10 +125,10 @@ Error codes:
 
 ## Negative numbers
 
-`node:util.parseArgs` reads a leading `-` as the start of the next option, so a
-space-separated negative would be rejected as ambiguous. Every signed value now rides a
-`key=value` pair instead — `--metric score=-2`, `--factor crowding=-1.5` — and a pair is
-one token beginning with a letter, so nothing is ambiguous and both spellings work:
+An argument parser reads a leading `-` as the start of the next option, so a
+space-separated negative would be ambiguous. Every signed value rides a `key=value` pair
+instead — `--metric score=-2`, `--factor crowding=-1.5` — and a pair is one token
+beginning with a letter, so nothing is ambiguous and both spellings work:
 
 ```
 janus macro record --metric score=-2 ...     # fine
@@ -77,7 +136,8 @@ janus macro record --metric=score=-2 ...     # also fine
 ```
 
 `param set` and `cluster set-param` take their key and value as **positional arguments**,
-so they are unaffected too — write `janus param set w_crowding -2` plainly.
+and turn on commander's positional passthrough so a bare `-2` is not mistaken for an
+option — write `janus param set w_crowding -2` plainly.
 
 ## Sessions
 
@@ -91,17 +151,32 @@ phase. It never creates one, and never back-dates.
 
 ## The five phases
 
-Run in order. Each stamps a completion timestamp on the session row, and each refuses to
-run until its predecessors are stamped (`PHASE_ORDER`, overridable with `--force`).
-`janus session status` reports where the pipeline stands.
+Each stamps a completion timestamp on the session row (`macro_at`, `cluster_at`,
+`coverage_at`, `screen_at`, `score_at`) and refuses to run until its **prerequisites** are
+stamped (`PHASE_ORDER`, overridable with `--force`). `janus session status` reports where
+the pipeline stands, and `next_phase` walks them in the recommended order below.
+
+Recommended order is not the same as dependency order:
+
+```
+macro ──▶ cluster ──┐
+                    ├──▶ screen ──▶ score
+coverage ───────────┘
+```
+
+**`coverage` depends on nothing.** It fetches market data and derives indicators from it;
+none of that touches the reads, so it can run first, alongside them, or on a day nobody
+reads anything. Everything downstream still waits for it, and `screen` still waits for
+the reads.
 
 1. **`macro`** — one macro read for the session: state and summary on the row, plus any
    number of `--metric key=value` pairs for what was observed. Completes immediately. If
-   no clusters exist, it vacuously completes `cluster_read` too.
+   no clusters exist, it vacuously completes `cluster` too.
 2. **`cluster record`** — one read per cluster, again as `--metric` pairs. Completes once
    every cluster has been read. It shares the `cluster` command with the roster verbs, so
    the session's reads list as `cluster reads` — `cluster list` stays the roster.
-3. **`coverage`** — the only phase that touches the network. Fetches daily candles and a
+3. **`coverage`** — the only phase that touches the network, and the only one with no
+   prerequisites. Fetches daily candles and a
    snapshot for every eligible asset (active roster entries on live markets, plus
    anything holding an open trade) and derives moving averages, ATR, and cross state. A
    full run (no `--asset`) completes the phase; assets with too little history are
@@ -223,6 +298,9 @@ These parameters are reserved for it and are read by nothing today:
 The `d_*` names predate `strength`; they mean the same number.
 
 ## Commands
+
+This list is a map; `--help` on any command is the authority, since it is generated from
+the parser itself. Every command also takes `--human`.
 
 `--notes`, `--summary`, `--rationale`, and `--thesis` accept `-` to read the value from
 stdin; `--metric` values are always inline. `--asset` takes a comma-separated list

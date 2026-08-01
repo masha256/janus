@@ -31,7 +31,7 @@ function freshDbFile(): string {
   migrate(db);
   ensureSession(db, DATE, NOW);
   stampPhase(db, DATE, "macro", NOW);
-  stampPhase(db, DATE, "cluster_read", NOW);
+  stampPhase(db, DATE, "cluster", NOW);
   stampPhase(db, DATE, "coverage", NOW);
   stampPhase(db, DATE, "screen", NOW);
   upsertMarkets(db, [

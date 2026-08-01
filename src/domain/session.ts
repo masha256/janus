@@ -1,13 +1,33 @@
 import { JanusError } from "../output.ts";
 
-export const PHASES = ["macro", "cluster_read", "coverage", "screen", "score"] as const;
+export const PHASES = ["macro", "cluster", "coverage", "screen", "score"] as const;
 export type Phase = (typeof PHASES)[number];
+
+/**
+ * What each phase actually depends on, as opposed to where it sits in the
+ * recommended order. `coverage` fetches market data and derives indicators from
+ * it: nothing in that touches the macro or cluster reads, so it is free to run
+ * first, or in parallel with them, or on a day the operator never reads at all.
+ * Everything downstream still needs it, and `screen` still needs the reads.
+ */
+const REQUIRES: Record<Phase, readonly Phase[]> = {
+  macro: [],
+  cluster: ["macro"],
+  coverage: [],
+  screen: ["cluster", "coverage"],
+  score: ["screen"],
+};
+
+/** Depth-first, so an error names the earliest missing phase rather than the nearest. */
+function prerequisites(phase: Phase): Phase[] {
+  return REQUIRES[phase].flatMap((earlier) => [...prerequisites(earlier), earlier]);
+}
 
 export type SessionRow = {
   session_date: string;
   opened_at: string;
   macro_at: string | null;
-  cluster_read_at: string | null;
+  cluster_at: string | null;
   coverage_at: string | null;
   screen_at: string | null;
   score_at: string | null;
@@ -40,11 +60,10 @@ export function nextPhase(session: SessionRow): Phase | null {
   return null;
 }
 
-/** Throws PHASE_ORDER naming the first incomplete predecessor. Re-running a done phase is fine. */
+/** Throws PHASE_ORDER naming the first incomplete prerequisite. Re-running a done phase is fine. */
 export function assertPhaseOrder(session: SessionRow, phase: Phase, force: boolean): void {
   if (force) return;
-  for (const earlier of PHASES) {
-    if (earlier === phase) return;
+  for (const earlier of prerequisites(phase)) {
     if (session[phaseColumn(earlier) as keyof SessionRow] === null) {
       throw new JanusError(
         "PHASE_ORDER",

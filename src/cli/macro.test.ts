@@ -36,7 +36,7 @@ test("zero clusters: a macro record vacuously completes cluster_read too", async
     const db = openDb(file);
     const session = getSession(db, DATE)!;
     db.close();
-    assert.notEqual(session.cluster_read_at, null);
+    assert.notEqual(session.cluster_at, null);
     assert.equal(nextPhase(session), "coverage");
   } finally {
     delete process.env["JANUS_DB"];
@@ -58,18 +58,18 @@ test("with a cluster present, a macro record does NOT stamp cluster_read", async
     const db = openDb(file);
     const session = getSession(db, DATE)!;
     db.close();
-    assert.equal(session.cluster_read_at, null, "vacuous stamp must not fire when there is real work to do");
-    assert.equal(nextPhase(session), "cluster_read");
+    assert.equal(session.cluster_at, null, "vacuous stamp must not fire when there is real work to do");
+    assert.equal(nextPhase(session), "cluster");
   } finally {
     delete process.env["JANUS_DB"];
     rmSync(file, { force: true });
   }
 });
 
-// parseArgs reads a bare leading `-` as the next option, which is why the old
-// `--score -2` was rejected as ambiguous. `--metric score=-2` has no such
-// problem: the value is one token that starts with `s`, so the whole bearish
-// half of the scale is reachable in the plain space-separated form.
+// An argument parser reads a bare leading `-` as the next option, which is why
+// the old `--score -2` was rejected as ambiguous. `--metric score=-2` has no
+// such problem: the value is one token that starts with `s`, so the whole
+// bearish half of the scale is reachable in the plain space-separated form.
 test("--metric score=-2 records a bearish macro", async () => {
   const file = freshDbFile();
   process.env["JANUS_DB"] = file;

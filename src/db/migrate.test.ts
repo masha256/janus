@@ -15,7 +15,7 @@ test("migrate creates every table and is idempotent", () => {
     .map((r) => (r as { name: string }).name);
 
   for (const t of [
-    "asset", "cluster", "cluster_param", "cluster_read", "cluster_read_metric",
+    "asset", "cluster", "cluster_param", "cluster", "cluster_read_metric",
     "cluster_read_result", "coverage", "global_param", "market", "macro_read",
     "macro_read_metric", "macro_read_result", "score", "score_metric", "score_result",
     "screen", "screen_metric", "screen_result", "session", "trade", "trade_unit",

@@ -67,7 +67,7 @@ function freshDbFile(): string {
   ensureSession(db, DATE, NOW);
   // Skip past macro/cluster_read so assertPhaseOrder lets coverage run.
   stampPhase(db, DATE, "macro", NOW);
-  stampPhase(db, DATE, "cluster_read", NOW);
+  stampPhase(db, DATE, "cluster", NOW);
   upsertMarkets(db, [
     { symbol: "XPL", market_id: 71, market_type: "perp", status: "active", price_decimals: 5, size_decimals: 1, listed_at: "2025-01-01" },
     { symbol: "CC", market_id: 101, market_type: "perp", status: "active", price_decimals: 2, size_decimals: 1, listed_at: "2025-01-01" },

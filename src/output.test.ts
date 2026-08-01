@@ -21,12 +21,13 @@ test("envelope renders an unknown error as VALIDATION-free INTERNAL", () => {
   });
 });
 
-test("envelope renders a parseArgs error as VALIDATION, preserving the message", () => {
-  const e = new Error("Unknown option '--bogus'") as Error & { code: string };
-  e.code = "ERR_PARSE_ARGS_UNKNOWN_OPTION";
+test("envelope renders a commander usage error as VALIDATION, minus its prefix", () => {
+  const e = new Error("error: unknown option '--bogus'") as Error & { code: string };
+  e.code = "commander.unknownOption";
   assert.deepEqual(envelope(e), {
     ok: false,
-    error: { code: "VALIDATION", message: "Unknown option '--bogus'" },
+    // The "error: " prefix is commander's own; the envelope already says as much.
+    error: { code: "VALIDATION", message: "unknown option '--bogus'" },
   });
 });
 
@@ -37,7 +38,7 @@ test("envelope does not match a plain Error with no code as VALIDATION", () => {
   });
 });
 
-test("envelope still prefers JanusError over the parseArgs branch", () => {
+test("envelope still prefers JanusError over the commander branch", () => {
   const e = new JanusError("SESSION_MISSING", "no session");
   assert.deepEqual(envelope(e), {
     ok: false,

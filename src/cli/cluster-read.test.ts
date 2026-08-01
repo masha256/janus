@@ -38,8 +38,8 @@ async function withHarness(run: () => Promise<void>): Promise<void> {
 }
 
 // See macro.test.ts: `--metric bias=-1` is one token, so the bearish half of
-// the scale survives parseArgs in the plain space-separated form. Judgement is
-// free text riding the same flag, stored in the metric table's value_text.
+// the scale survives option parsing in the plain space-separated form.
+// Judgement is free text riding the same flag, stored in value_text.
 test("--metric bias=-1 records a bearish cluster read alongside its judgement", async () => {
   await withHarness(async () => {
     const result = (await handle("record", [

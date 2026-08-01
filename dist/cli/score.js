@@ -1,0 +1,125 @@
+import { Command } from "commander";
+import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.js";
+import { requireAssetBySymbol } from "../db/repo/asset.js";
+import { getClusterParams, getGlobalParams } from "../db/repo/cluster.js";
+import { scoreQueue, positionOf, openPositions, recordScore, listScores } from "../db/repo/score.js";
+import { getMacro, getClusterRead } from "../db/repo/phase.js";
+import { listCoverage, getCoverage } from "../db/repo/coverage.js";
+import { listScreen, getScreen } from "../db/repo/screen.js";
+import { resolveParams } from "../domain/params.js";
+import { deriveScore } from "../domain/score.js";
+import { formatPosition } from "../domain/directive.js";
+import { assertPhaseOrder, nowIso } from "../domain/session.js";
+import { pairs, readText, required, unknownVerb } from "./args.js";
+import { collect, handler, withDb } from "./command.js";
+import { JanusError } from "../output.js";
+export function build(emit) {
+    const cmd = new Command("score")
+        .description("The weighted decision for everything in the queue (phase 5)")
+        .action(() => { throw unknownVerb(undefined, "score", "queue, record, list"); });
+    cmd.command("queue")
+        .description("What needs scoring: flagged this session, plus anything holding an open trade")
+        .option("--date <YYYY-MM-DD>", "defaults to today, New York")
+        .action(async (opts) => emit(await queue(opts.date)));
+    cmd.command("record")
+        .description("Score one queued asset")
+        .argument("[symbol]", "market symbol")
+        .option("--factor <KEY=VALUE>", "a scoring factor, -2 to 2; repeatable", collect)
+        .option("--rationale <TEXT>", "free text; - reads stdin")
+        .option("--date <YYYY-MM-DD>", "address an existing session")
+        .option("--force", "run out of phase order")
+        .action(async (symbol, opts) => emit(await record(symbol, opts)));
+    cmd.command("list")
+        .description("The scores recorded for a session, strongest first")
+        .option("--date <YYYY-MM-DD>", "defaults to today, New York")
+        .action(async (opts) => emit(await list(opts.date)));
+    return cmd;
+}
+function queue(date) {
+    return withDb((db) => {
+        const on = readSessionDate(db, date, nowIso());
+        const entries = scoreQueue(db, on);
+        const coverage = listCoverage(db, on);
+        const screens = listScreen(db, on, {});
+        const bySymbol = (rows) => new Map(rows.map((r) => [r.symbol, r]));
+        const cov = bySymbol(coverage);
+        const scr = bySymbol(screens);
+        return {
+            session_date: on,
+            count: entries.length,
+            queue: entries.map((q) => ({
+                ...q,
+                position: formatPosition(positionOf(db, q.asset_id)),
+                coverage: cov.get(q.symbol) ?? null,
+                screen: scr.get(q.symbol) ?? null,
+            })),
+        };
+    });
+}
+function record(symbol, opts) {
+    return withDb((db) => {
+        const now = nowIso();
+        const session = resolveSession(db, opts.date, now);
+        assertPhaseOrder(session, "score", opts.force === true);
+        const asset = requireAssetBySymbol(db, required(symbol, "symbol").toUpperCase());
+        const entries = scoreQueue(db, session.session_date);
+        const entry = entries.find((q) => q.asset_id === asset.id);
+        if (entry === undefined) {
+            throw new JanusError("NOT_FLAGGED", `${asset.symbol} is not in the scoring queue for ${session.session_date}`);
+        }
+        const factors = pairs(opts.factor, "factor");
+        if (Object.keys(factors).length === 0) {
+            throw new JanusError("VALIDATION", "at least one --factor key=value is required");
+        }
+        const params = resolveParams(getClusterParams(db, asset.cluster_id), getGlobalParams(db));
+        // Everything the session already concluded, top down, plus the whole book.
+        const context = {
+            macro: getMacro(db, session.session_date),
+            cluster: asset.cluster_id === null
+                ? null
+                : getClusterRead(db, session.session_date, asset.cluster_id),
+            screen: getScreen(db, session.session_date, asset.id),
+            positions: openPositions(db),
+            asset: {
+                symbol: asset.symbol,
+                class: asset.class,
+                cluster_id: asset.cluster_id,
+                coverage: getCoverage(db, session.session_date, asset.id),
+            },
+        };
+        const { strength, conviction, directive, results } = deriveScore(factors, context, params);
+        const position = positionOf(db, asset.id);
+        recordScore(db, session.session_date, asset.id, {
+            strength, conviction, directive,
+            queue_reason: entry.queue_reason,
+            position_state: formatPosition(position),
+            rationale: readText(opts.rationale) ?? null,
+            // The factors as given; everything else the formula concluded alongside.
+            metrics: factors,
+            results,
+        }, now);
+        const scored = listScores(db, session.session_date).length;
+        const complete = scored >= entries.length;
+        if (complete)
+            stampPhase(db, session.session_date, "score", now);
+        return {
+            session_date: session.session_date,
+            symbol: asset.symbol,
+            strength, conviction, directive,
+            position: formatPosition(position),
+            queue_reason: entry.queue_reason,
+            metrics: factors,
+            results,
+            scored, of: entries.length,
+            phase_complete: complete,
+        };
+    });
+}
+function list(date) {
+    return withDb((db) => {
+        const on = readSessionDate(db, date, nowIso());
+        const scores = listScores(db, on);
+        return { session_date: on, count: scores.length, scores };
+    });
+}
+export const handle = handler(build);

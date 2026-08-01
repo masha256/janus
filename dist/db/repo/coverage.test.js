@@ -1,0 +1,61 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { openDb } from "../connect.js";
+import { migrate } from "../migrate.js";
+import { ensureSession } from "./session.js";
+import { upsertMarkets } from "./market.js";
+import { addAsset, requireAssetBySymbol } from "./asset.js";
+import { upsertCoverage, listCoverage } from "./coverage.js";
+const NOW = "2026-07-31T12:00:00Z";
+const DATE = "2026-07-31";
+const values = (close) => ({
+    open: close, high: close, low: close, close, volume: 1,
+    mark_price: close, index_price: close, open_interest: 1, daily_change_pct: 0,
+    sma20: null, sma50: null, sma200: null, ema12: null, ema26: null, atr14: null,
+    px_vs_sma20: null, px_vs_sma50: null, px_vs_sma200: null,
+    cross_50_200: null, cross_50_200_age: null, cross_px_50: null, cross_px_50_age: null,
+    bars_available: 3, fetched_at: NOW,
+});
+function fresh() {
+    const db = openDb(":memory:");
+    migrate(db);
+    ensureSession(db, DATE, NOW);
+    upsertMarkets(db, [
+        { symbol: "BTC", market_id: 1, market_type: "perp", status: "active", price_decimals: 1, size_decimals: 5, listed_at: "2025-01-01" },
+        { symbol: "ETH", market_id: 2, market_type: "perp", status: "active", price_decimals: 2, size_decimals: 4, listed_at: "2025-01-01" },
+    ], NOW);
+    addAsset(db, "BTC", "crypto", null, null, NOW);
+    addAsset(db, "ETH", "crypto", null, null, NOW);
+    return db;
+}
+test("upsertCoverage writes rows and overwrites on re-run", () => {
+    const db = fresh();
+    const btc = requireAssetBySymbol(db, "BTC").id;
+    upsertCoverage(db, DATE, [{ asset_id: btc, values: values(100) }]);
+    upsertCoverage(db, DATE, [{ asset_id: btc, values: values(200) }]);
+    const rows = listCoverage(db, DATE);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].close, 200);
+    db.close();
+});
+test("listCoverage filters by symbol", () => {
+    const db = fresh();
+    upsertCoverage(db, DATE, [
+        { asset_id: requireAssetBySymbol(db, "BTC").id, values: values(100) },
+        { asset_id: requireAssetBySymbol(db, "ETH").id, values: values(50) },
+    ]);
+    assert.equal(listCoverage(db, DATE).length, 2);
+    const only = listCoverage(db, DATE, ["ETH"]);
+    assert.deepEqual(only.map((r) => r.symbol), ["ETH"]);
+    db.close();
+});
+test("a failed row rolls the whole batch back", () => {
+    const db = fresh();
+    const btc = requireAssetBySymbol(db, "BTC").id;
+    assert.throws(() => upsertCoverage(db, DATE, [
+        { asset_id: btc, values: values(100) },
+        { asset_id: 9999, values: values(100) }, // no such asset — FK violation
+    ]));
+    assert.equal(listCoverage(db, DATE).length, 0, "nothing may survive a failed batch");
+    db.close();
+});

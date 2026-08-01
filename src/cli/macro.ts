@@ -1,5 +1,4 @@
-import { parseArgs } from "node:util";
-import { openDb } from "../db/connect.ts";
+import { Command } from "commander";
 import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
 import { recordMacro, getMacro } from "../db/repo/phase.ts";
 import { listClusters, getGlobalParams } from "../db/repo/cluster.ts";
@@ -7,58 +6,70 @@ import { resolveParams } from "../domain/params.ts";
 import { deriveMacroRead } from "../domain/read.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
 import { metricPairs, oneOf, readText, required, unknownVerb } from "./args.ts";
+import { collect, type Emit, handler, withDb } from "./command.ts";
 
 const STATES = ["RISK_ON", "NEUTRAL", "RISK_OFF"] as const;
 
-export async function handle(verb: string | undefined, argv: string[]): Promise<unknown> {
-  const db = openDb();
-  try {
-    const { values } = parseArgs({
-      args: argv,
-      options: {
-        state: { type: "string" }, summary: { type: "string" },
-        metric: { type: "string", multiple: true },
-        date: { type: "string" }, force: { type: "boolean" },
-      },
-    });
+type RecordOpts = { state?: string; summary?: string; metric: string[]; date?: string; force?: boolean };
 
-    if (verb === "record") {
-      const now = nowIso();
-      const session = resolveSession(db, values.date, now);
-      assertPhaseOrder(session, "macro", values.force === true);
-      // Whatever was recorded goes through as-is; deriveMacroRead decides which
-      // metrics it cannot do without and refuses the rest.
-      const metrics = metricPairs(values.metric, "metric");
-      // The macro read is session-wide, so it resolves against the global rung only.
-      const params = resolveParams({}, getGlobalParams(db));
+export function build(emit: Emit): Command {
+  const cmd = new Command("macro")
+    .description("The session's macro read (phase 1)")
+    .action(() => { throw unknownVerb(undefined, "macro", "record, reads"); });
 
-      recordMacro(db, session.session_date, {
-        state: oneOf(values.state, "state", STATES),
-        summary: required(readText(values.summary), "summary"),
-        metrics,
-        results: deriveMacroRead(metrics, params),
-      }, now);
-      stampPhase(db, session.session_date, "macro", now);
-      const stamped = ["macro"];
-      // A phase with nothing to read is vacuously complete. Without this, a
-      // session with no clusters could never stamp cluster_read_at, because
-      // cluster record requires a cluster key that does not exist.
-      if (listClusters(db).length === 0) {
-        stampPhase(db, session.session_date, "cluster_read", now);
-        stamped.push("cluster_read");
-      }
-      return {
-        session_date: session.session_date,
-        stamped,
-        ...getMacro(db, session.session_date),
-      };
-    }
-    if (verb === "reads") {
-      const date = readSessionDate(db, values.date, nowIso());
-      return { session_date: date, ...getMacro(db, date) };
-    }
-    throw unknownVerb(verb, "macro", "record, reads");
-  } finally {
-    db.close();
-  }
+  cmd.command("record")
+    .description("Record the macro read; completes phase 1")
+    .option("--state <STATE>", STATES.join(" | "))
+    .option("--summary <TEXT>", "one line on the tape; - reads stdin")
+    .option("--metric <KEY=VALUE>", "what the read observed; repeatable", collect)
+    .option("--date <YYYY-MM-DD>", "address an existing session")
+    .option("--force", "run out of phase order")
+    .action(async (opts: RecordOpts) => emit(await record(opts)));
+
+  cmd.command("reads")
+    .description("The macro read for a session, with its metrics and results")
+    .option("--date <YYYY-MM-DD>", "defaults to today, New York")
+    .action(async (opts: { date?: string }) => emit(await reads(opts.date)));
+
+  return cmd;
 }
+
+function record(opts: RecordOpts): Promise<unknown> {
+  return withDb((db) => {
+    const now = nowIso();
+    const session = resolveSession(db, opts.date, now);
+    assertPhaseOrder(session, "macro", opts.force === true);
+    // Whatever was recorded goes through as-is; deriveMacroRead decides which
+    // metrics it cannot do without and refuses the rest.
+    const metrics = metricPairs(opts.metric, "metric");
+    // The macro read is session-wide, so it resolves against the global rung only.
+    const params = resolveParams({}, getGlobalParams(db));
+
+    recordMacro(db, session.session_date, {
+      state: oneOf(opts.state, "state", STATES),
+      summary: required(readText(opts.summary), "summary"),
+      metrics,
+      results: deriveMacroRead(metrics, params),
+    }, now);
+
+    stampPhase(db, session.session_date, "macro", now);
+    const stamped = ["macro"];
+    // A phase with nothing to read is vacuously complete. Without this, a
+    // session with no clusters could never stamp cluster_at, because
+    // cluster record requires a cluster key that does not exist.
+    if (listClusters(db).length === 0) {
+      stampPhase(db, session.session_date, "cluster", now);
+      stamped.push("cluster");
+    }
+    return { session_date: session.session_date, stamped, ...getMacro(db, session.session_date) };
+  });
+}
+
+function reads(date?: string): Promise<unknown> {
+  return withDb((db) => {
+    const on = readSessionDate(db, date, nowIso());
+    return { session_date: on, ...getMacro(db, on) };
+  });
+}
+
+export const handle = handler(build);

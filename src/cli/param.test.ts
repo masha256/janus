@@ -26,7 +26,7 @@ function freshDbFile(): string {
   const db = openDb(file);
   migrate(db);
   ensureSession(db, DATE, NOW);
-  for (const p of ["macro", "cluster_read", "coverage", "screen"] as const) stampPhase(db, DATE, p, NOW);
+  for (const p of ["macro", "cluster", "coverage", "screen"] as const) stampPhase(db, DATE, p, NOW);
   upsertMarkets(db, [
     { symbol: "BTC", market_id: 1, market_type: "perp", status: "active", price_decimals: 1, size_decimals: 5, listed_at: "2025-01-01" },
   ], NOW);
@@ -81,6 +81,9 @@ test("param set rejects a non-numeric value", async () => {
   });
 });
 
+// Commander reads a leading `-` as an option, so `param set` and
+// `cluster set-param` turn positional passthrough on. Without it the whole
+// negative half of every weight is unreachable.
 test("param set accepts a negative weight passed positionally", async () => {
   await withHarness(async () => {
     await handle("set", ["w_crowding", "-2"]);

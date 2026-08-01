@@ -42,7 +42,7 @@ function freshDbFile(): string {
   migrate(db);
   ensureSession(db, DATE, NOW);
   stampPhase(db, DATE, "macro", NOW);
-  stampPhase(db, DATE, "cluster_read", NOW);
+  stampPhase(db, DATE, "cluster", NOW);
   stampPhase(db, DATE, "coverage", NOW);
   upsertMarkets(db, [
     { symbol: "BTC", market_id: 1, market_type: "perp", status: "active", price_decimals: 1, size_decimals: 5, listed_at: "2025-01-01" },
@@ -207,7 +207,7 @@ test("NOT_FOUND for a symbol not on the roster", async () => {
 });
 
 // See macro.test.ts: `--metric score=-1.5` is one token, so the bearish half
-// of the scale survives parseArgs in the plain space-separated form.
+// of the scale survives option parsing in the plain space-separated form.
 test("--metric score=-1.5 records a bearish screen and does not flag", async () => {
   await withHarness(async (file) => {
     withDb(file, (db) => {

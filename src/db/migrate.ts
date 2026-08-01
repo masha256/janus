@@ -43,13 +43,13 @@ CREATE TABLE asset (
 );
 
 CREATE TABLE session (
-  session_date     TEXT PRIMARY KEY,
-  opened_at        TEXT NOT NULL,
-  macro_at        TEXT,
-  cluster_read_at  TEXT,
-  coverage_at      TEXT,
-  screen_at        TEXT,
-  score_at         TEXT
+  session_date  TEXT PRIMARY KEY,
+  opened_at     TEXT NOT NULL,
+  macro_at      TEXT,
+  cluster_at    TEXT,
+  coverage_at   TEXT,
+  screen_at     TEXT,
+  score_at      TEXT
 );
 
 CREATE TABLE macro_read (
