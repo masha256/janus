@@ -136,10 +136,32 @@ test("the full daily pipeline runs end to end", async () => {
   assert.equal(status.body.data.next_phase, null, "every phase should be complete");
 });
 
-test("scoring an asset outside the queue is refused", async () => {
+test("scoring against a nonexistent session is refused", async () => {
   const res = await janus("score", "record", "XPL", "--factor", "catalyst=1", "--date", "1999-01-01");
   assert.equal(res.code, 1);
   assert.equal(res.body.error.code, "SESSION_MISSING");
+});
+
+test("scoring a screened-but-unflagged asset is refused with NOT_FLAGGED", async () => {
+  // A real current session already exists from the pipeline test above.
+  // Add a second roster asset and cover it, but screen it below the flag
+  // threshold (rather than skipping screen entirely) so screen_at stays
+  // reachable — scoreQueue only pulls flagged rows (or open trades), so an
+  // asset that was screened and came in under threshold is off the queue
+  // without leaving the screen phase looking incomplete.
+  const added = await janus("asset", "add", "CC", "--class", "crypto");
+  assert.equal(added.body.ok, true, JSON.stringify(added.body));
+
+  const coverage = await janus("coverage", "run");
+  assert.equal(coverage.body.ok, true, JSON.stringify(coverage.body));
+
+  const screen = await janus("screen", "record", "CC", "--score", "0.2", "--confidence", "0.5");
+  assert.equal(screen.body.ok, true, JSON.stringify(screen.body));
+  assert.equal(screen.body.data.flagged, false);
+
+  const res = await janus("score", "record", "CC", "--factor", "catalyst=1");
+  assert.equal(res.code, 1);
+  assert.equal(res.body.error.code, "NOT_FLAGGED");
 });
 
 test("a trade changes the directive on the next scoring run", async () => {
@@ -154,6 +176,7 @@ test("a trade changes the directive on the next scoring run", async () => {
     "trade", "open", "XPL", "--direction", "long",
     "--price", "100", "--stop", "90", "--risk", "100", "--notional", "1000",
   );
+  assert.equal(conflict.code, 1);
   assert.equal(conflict.body.error.code, "POSITION_CONFLICT");
 
   // Re-scoring now sees an open position, so the directive is position-aware.
