@@ -5,7 +5,7 @@ import { JanusError } from "../output.ts";
  * written to the `_metric` tables (what was observed) and the `_result` tables
  * (what was concluded from it).
  */
-export type Metrics = Record<string, number | string>;
+export type Metrics = Record<string, number | string | boolean>;
 
 /** A numeric metric, or `fallback` when it is absent or was recorded as text. */
 export function num(metrics: Metrics, key: string, fallback = 0): number {

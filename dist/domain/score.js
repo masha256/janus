@@ -1,76 +1,124 @@
 import { JanusError } from "../output.js";
-import { num } from "./metrics.js";
+import { num, requireNum } from "./metrics.js";
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 /**
- * v1 placeholder. `strength` is the weighted mean of the metrics; `conviction`
- * rewards signal strength and inter-metric agreement equally. The context is
- * reported on rather than acted on: the weighted mean stands on its own, and
- * the alignment flags record whether the top-down reads back it up.
+ * deriveScore turns the agent's scoring metrics into a direction and conviction.
  *
- * `directive` is a stub — every score returns NONE until the real ladder lands.
- * When it does, it belongs here, with the whole context already in hand.
+ * Inputs:
+ *   catalyst     -2..+2
+ *   trend        -2..+2
+ *   secular      -2..+2
+ *   crowding     1..100
+ *   capitulation true/false
+ *   divergence   true/false
  *
- * Replacing any of this is a single-file change — nothing outside reads it.
+ * A sentiment score (SC) is derived from crowding using the §6 step-2 bands,
+ * with a divergence booster in step 4. Direction is the weighted sum of
+ * catalyst, sentiment, trend, the session's regime_smile, and secular, clamped
+ * to [-2, 2]. Conviction fuses the magnitude of direction with screen
+ * confidence: 1 + 9 * ((|D|/2)^0.8 * (Q^0.2)).
  */
 export function deriveScore(metrics, context, params) {
-    // A score metric has to be a number in range — this formula takes a weighted
-    // mean of them. Narrowing here is what lets the rest do arithmetic safely.
-    const values = {};
-    const applied = {};
-    for (const [key, value] of Object.entries(metrics)) {
-        if (typeof value !== "number" || !Number.isFinite(value) || value < -2 || value > 2) {
-            throw new JanusError("VALIDATION", `factor ${key} must be a number between -2 and 2, got ${value}`);
-        }
-        values[key] = value;
-        applied[key] = params[`w_${key}`] ?? 0;
-    }
-    // The weight actually applied to each factor is a conclusion, not an
-    // observation, so it rides along in the results.
-    const weights = {};
-    for (const [key, w] of Object.entries(applied))
-        weights[`w_${key}`] = w;
-    const weighted = Object.entries(applied).filter(([, w]) => w !== 0);
-    const totalWeight = weighted.reduce((a, [, w]) => a + Math.abs(w), 0);
-    if (totalWeight === 0) {
-        return {
-            strength: 0,
-            conviction: 1,
-            directive: deriveDirective(),
-            results: { ...weights, ...alignment(0, context) },
-        };
-    }
-    const strength = clamp(weighted.reduce((a, [k, w]) => a + w * values[k], 0) / totalWeight, -2, 2);
-    const agree = Math.abs(weighted.reduce((a, [k, w]) => a + Math.sign(w * values[k]) * Math.abs(w), 0)) /
-        totalWeight;
-    const conviction = clamp(Math.round(1 + 9 * (0.5 * (Math.abs(strength) / 2) + 0.5 * agree)), 1, 10);
+    const catalyst = requireFactor(metrics, "catalyst");
+    const trend = requireFactor(metrics, "trend");
+    const secular = requireFactor(metrics, "secular");
+    const crowding = requireCrowding(metrics);
+    const capitulation = Boolean(metrics["capitulation"]);
+    const divergence = Boolean(metrics["divergence"]);
+    const { sc: sentiment, band } = sentimentFromCrowding(crowding, trend, capitulation, divergence);
+    const regimeSmile = num(context.cluster?.results ?? {}, "regime_smile") ?? 0;
+    const wCat = params["w_catalyst"] ?? 0;
+    const wSent = params["w_sentiment"] ?? 0;
+    const wTrend = params["w_trend"] ?? 0;
+    const wRegime = params["w_regime"] ?? 0;
+    const wSecular = params["w_secular"] ?? 0;
+    const direction = clamp(wCat * catalyst + wSent * sentiment + wTrend * trend + wRegime * regimeSmile + wSecular * secular, -2, 2);
+    const confidence = context.screen === null ? 0 : requireNum(context.screen.metrics, "confidence", 0, 1);
+    const conviction = clamp(1 + 9 * ((Math.abs(direction) / 2) ** 0.8 * (confidence ** 0.2)), 1, 10);
     return {
-        strength,
-        conviction,
+        strength: direction,
+        conviction: Math.round(conviction),
         directive: deriveDirective(),
-        results: { ...weights, ...alignment(strength, context) },
+        results: {
+            w_catalyst: wCat,
+            w_sentiment: wSent,
+            w_trend: wTrend,
+            w_regime: wRegime,
+            w_secular: wSecular,
+            sentiment,
+            sentiment_band: band,
+            macro_aligned: alignment(direction, context.macro.results),
+            cluster_aligned: context.cluster === null ? 0 : alignment(direction, context.cluster.results),
+        },
     };
+}
+function requireFactor(metrics, key) {
+    const value = metrics[key];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < -2 || value > 2) {
+        throw new JanusError("VALIDATION", `factor ${key} must be a number between -2 and 2, got ${value}`);
+    }
+    return value;
+}
+function requireCrowding(metrics) {
+    const value = metrics["crowding"];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 1 || value > 100) {
+        throw new JanusError("VALIDATION", `crowding must be a number between 1 and 100, got ${value}`);
+    }
+    return value;
+}
+function sentimentFromCrowding(P, trend, capitulation, divergence) {
+    let base;
+    let band;
+    if (capitulation || P <= 12) {
+        base = 2.0;
+        band = "<=12 / capitulation - true panic";
+    }
+    else if (P < 25) {
+        base = 1.0;
+        band = "12-25 - fear";
+    }
+    else if (P < 40) {
+        base = 0.75 * (40 - P) / 15.0;
+        band = "25-40 - getting fearful (linear)";
+    }
+    else if (P < 65) {
+        const s = trend > 0 ? 1.0 : (trend < 0 ? -1.0 : 0.0);
+        base = 0.4 * s;
+        band = "40-65 - calm middle (+0.4 x sign(Trend))";
+    }
+    else if (P < 85) {
+        base = -1.0 * (P - 65) / 20.0;
+        band = "65-85 - getting crowded (linear)";
+    }
+    else if (P < 95) {
+        base = -1.5;
+        band = "85-95 - greed, fade";
+    }
+    else {
+        base = -2.0;
+        band = ">=95 - true euphoria, fade hard";
+    }
+    let sc = base;
+    if (divergence) {
+        if (base === 0) {
+            band += " (divergence booster skipped: SC_base = 0, no fade direction)";
+        }
+        else {
+            sc = clamp(base + Math.sign(base) * 0.5, -2.0, 2.0);
+            band += " + divergence booster";
+        }
+    }
+    return { sc, band };
+}
+function alignment(direction, results) {
+    const tilt = num(results, "regime_smile") ?? 0;
+    return Math.sign(direction) !== 0 && Math.sign(direction) === Math.sign(tilt) ? 1 : 0;
 }
 /**
  * Stub. The ladder that turns strength, conviction, and the open position into
  * INITIATE/ADD/HOLD/TRIM/EXIT is still to be written; until then every score
  * concludes NONE rather than guessing.
- *
- * ponytail: stubbed directive. The `d_*`, `conv_*`, and `max_units` parameters
- * are reserved for the real ladder and read by nothing until it lands — delete
- * them from DEFAULT_PARAMS if it turns out they are not the shape it wants.
  */
 function deriveDirective() {
     return "NONE";
-}
-/**
- * Does the session's top-down read back this decision up? 1 when the tilt
- * agrees in direction, 0 when it does not or when either side is flat. An
- * unclustered asset has no cluster read, so `cluster_aligned` stays 0.
- */
-function alignment(strength, context) {
-    const agrees = (tilt) => Math.sign(strength) !== 0 && Math.sign(strength) === Math.sign(tilt) ? 1 : 0;
-    return {
-        macro_aligned: agrees(num(context.macro.results, "tilt")),
-        cluster_aligned: context.cluster === null ? 0 : agrees(num(context.cluster.results, "tilt")),
-    };
 }

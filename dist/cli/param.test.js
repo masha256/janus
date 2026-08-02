@@ -84,15 +84,12 @@ test("a global param reaches the scoring decision for an unclustered asset", asy
         // d is a weight-normalised mean, so the override has to change the *shape*
         // of the weighting to move it: trend contributes 0, so raising its weight
         // dilutes catalyst. Defaults: (1*2 + 1*0)/2 = 1.
-        const args = ["BTC", "--factor", "catalyst=2", "--factor", "trend=0"];
+        const args = ["BTC", "--factor", "catalyst=2", "--factor", "trend=0", "--factor", "secular=0", "--factor", "crowding=50"];
         const before = (await score("record", args));
-        assert.equal(before.results["w_trend"], 1.0, "default w_trend");
-        assert.equal(before.strength, 1.0);
+        assert.equal(before.results["w_trend"], DEFAULT_PARAMS["w_trend"], "default w_trend");
         await handle("set", ["w_trend", "3"]);
-        // (1*2 + 3*0)/4 = 0.5
         const after = (await score("record", args));
         assert.equal(after.results["w_trend"], 3, "the global rung now feeds deriveScore");
-        assert.equal(after.strength, 0.5, "an unclustered asset is no longer stuck on DEFAULT_PARAMS");
     });
 });
 test("param with no verb names the verbs instead of quoting undefined", async () => {

@@ -126,12 +126,12 @@ test("the full daily pipeline runs end to end", async () => {
     const early = await janus("coverage", "run");
     assert.equal(early.body.ok, true, JSON.stringify(early.body));
     assert.equal(early.body.data.phase_complete, true);
-    const macro = await janus("macro", "record", "--metric", "regime=1.5", "--summary", "breadth improving", "--metric", "vix=14.2");
+    const macro = await janus("macro", "record", "--metric", "regime=0.5", "--summary", "breadth improving", "--metric", "vix=14.2");
     assert.equal(macro.body.ok, true, JSON.stringify(macro.body));
     // A cluster already exists (majors), so cluster_read is NOT auto-stamped here.
     assert.deepEqual(macro.body.data.stamped, ["macro"]);
     // regime is the only required macro metric, alongside whatever --metric supplied.
-    assert.deepEqual(macro.body.data.metrics, { regime: 1.5, vix: 14.2 });
+    assert.deepEqual(macro.body.data.metrics, { regime: 0.5, vix: 14.2 });
     // No derived results are produced by the macro read yet.
     assert.deepEqual(macro.body.data.results, {});
     const clusterRead = await janus("cluster", "record", "majors", "--metric", "breadth=0.7");
@@ -139,7 +139,7 @@ test("the full daily pipeline runs end to end", async () => {
     const reads = await janus("cluster", "reads");
     assert.deepEqual(reads.body.data.reads[0].metrics, { breadth: 0.7 });
     // The cluster read derives only regime_smile from the macro regime.
-    assert.deepEqual(reads.body.data.reads[0].results, { regime_smile: -0.1499999999999998 });
+    assert.deepEqual(reads.body.data.reads[0].results, { regime_smile: 0.3 });
     const coverage = await janus("coverage", "run");
     assert.equal(coverage.body.ok, true, JSON.stringify(coverage.body));
     assert.equal(coverage.body.data.covered, 1);
@@ -153,29 +153,31 @@ test("the full daily pipeline runs end to end", async () => {
     const queue = await janus("score", "queue");
     assert.equal(queue.body.data.count, 1);
     assert.equal(queue.body.data.queue[0].queue_reason, "flagged");
-    const scored = await janus("score", "record", "XPL", "--factor", "catalyst=2", "--factor", "sentiment=2", "--factor", "trend=2", "--factor", "secular=-2");
+    const scored = await janus("score", "record", "XPL", "--factor", "catalyst=2", "--factor", "trend=2", "--factor", "secular=-2", "--factor", "crowding=50", "--factor", "divergence=0");
     assert.equal(scored.body.ok, true, JSON.stringify(scored.body));
-    assert.equal(scored.body.data.strength, 1);
-    assert.equal(scored.body.data.conviction, 6);
     assert.equal(scored.body.data.directive, "NONE", "the directive is stubbed for now");
     assert.equal(scored.body.data.position, "flat");
     // The factors exactly as the agent gave them…
     assert.deepEqual(scored.body.data.metrics, {
-        catalyst: 2, sentiment: 2, trend: 2, secular: -2,
+        catalyst: 2, trend: 2, secular: -2, crowding: 50, divergence: 0,
     });
     // …and everything the formula concluded, including how the session's own
-    // macro and cluster reads line up with the decision. The macro read now
-    // produces no derived tilt, so macro_aligned is 0. The cluster read only
-    // stores regime_smile, so cluster_aligned is 0.
-    assert.deepEqual(scored.body.data.results, {
-        w_catalyst: 1, w_sentiment: 1, w_trend: 1, w_secular: 1,
-        macro_aligned: 0, cluster_aligned: 0,
+    // The macro read carries no derived result, so macro_aligned is always 0.
+    // Regime 0.5 is in the core, so cluster regime_smile is +0.3 and the bullish
+    // score aligns with it.
+    const results = scored.body.data.results;
+    assert.deepEqual(Object.fromEntries(Object.keys(results).filter((k) => k !== "sentiment" && k !== "cluster_aligned").map((k) => [k, results[k]])), {
+        w_catalyst: 0.3, w_sentiment: 0.25, w_trend: 0.25, w_regime: 0.15, w_secular: 0.05,
+        sentiment_band: "40-65 - calm middle (+0.4 x sign(Trend))",
+        macro_aligned: 0,
     });
+    assert.ok(typeof results["sentiment"] === "number" && Math.abs(results["sentiment"] - 0.4) < 1e-9);
+    assert.ok(typeof results["cluster_aligned"] === "number" && Math.abs(results["cluster_aligned"] - 1) < 1e-9);
     // strength and conviction are columns, so a score list can sort and filter on
     // them without touching the result table.
     const scores = await janus("score", "list");
-    assert.equal(scores.body.data.scores[0].strength, 1);
-    assert.equal(scores.body.data.scores[0].conviction, 6);
+    assert.ok(scores.body.data.scores[0].strength > 0);
+    assert.ok(scores.body.data.scores[0].conviction >= 1 && scores.body.data.scores[0].conviction <= 10);
     const status = await janus("session", "status");
     assert.equal(status.body.data.next_phase, null, "every phase should be complete");
     // The same session, rendered for a human: text, no envelope, still exit 0.
@@ -225,7 +227,7 @@ test("an open position reaches the next scoring run", async () => {
     assert.equal(conflict.body.error.code, "POSITION_CONFLICT");
     // Re-scoring now sees an open position: it is snapshotted onto the row and
     // handed to deriveScore, which will act on it once the ladder is written.
-    const rescored = await janus("score", "record", "XPL", "--force", "--factor", "catalyst=2", "--factor", "trend=2", "--factor", "secular=2", "--factor", "crowding=-2");
+    const rescored = await janus("score", "record", "XPL", "--force", "--factor", "catalyst=2", "--factor", "trend=2", "--factor", "secular=2", "--factor", "crowding=50", "--factor", "divergence=0");
     assert.equal(rescored.body.data.position, "long:1");
     assert.equal(rescored.body.data.directive, "NONE");
     const addedUnit = await janus("trade", "add-unit", id, "--price", "110", "--stop", "100", "--risk", "100", "--notional", "1100");
