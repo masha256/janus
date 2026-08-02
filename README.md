@@ -95,7 +95,7 @@ count: 1
 scores (1):
   symbol  class   strength  conviction  directive  metrics             results
   ------  ------  --------  ----------  ---------  ------------------  -------------------
-  XPL     crypto  2         10          NONE       catalyst=2 trend=2  macro_aligned=1 ...
+  XPL     crypto  2         10          NONE       catalyst=2 trend=2  agreement=1 ...
 ```
 
 It is a display flag only — JSON stays the default, so nothing an agent parses changes.
@@ -229,10 +229,15 @@ What the v1 formulas require and produce today:
 
 | Phase | Formula | Requires | Concludes |
 | --- | --- | --- | --- |
-| macro | `deriveMacroRead` (`domain/read.ts`) | `score` (−2…2), `confidence` (0…2) | `tilt`, `risk_budget` |
-| cluster | `deriveClusterRead` (`domain/read.ts`) | `bias` (−2…2), `judgement` (text) | `tilt`, `aligned` |
-| screen | `deriveScreen` (`domain/screen.ts`) | `score` (−2…2), `confidence` (0…2) | the `flagged` column, and `threshold` |
-| score | `deriveScore` (`domain/score.ts`) | at least one `--factor`, each −2…2 | the `strength`, `conviction`, and `directive` columns, and `w_<factor>`, `macro_aligned`, `cluster_aligned` |
+| macro | `deriveMacroRead` (`domain/read.ts`) | `regime` (−2…2) | (none v1) |
+| cluster | `deriveClusterRead` (`domain/read.ts`) | `regime` (−2…2) | (none v1) |
+| screen | `deriveScreen` (`domain/screen.ts`) | `score` (1…10), `confidence` (0…1) | the `flagged` column, and `threshold`, `regime_smile` |
+| score | `deriveScore` (`domain/score.ts`) | at least one `--factor`, each −2…2 (`crowding` 1…100; `confidence` 0…1 quality, absent = 0) | the `strength`, `conviction`, and `directive` columns, and `w_<factor>`, `sentiment`, `agreement`, `confidence` |
+
+**Everywhere it appears, `confidence` is a quality on 0…1** — higher means more
+trustworthy, and a missing confidence means "no information" (0), never
+"inherit another phase's". An older ± margin-of-error scale on 0…2 is
+retired; nothing reads it.
 
 Anything else passed as `--metric` is stored untouched alongside the required ones. A
 missing or out-of-range requirement is a `VALIDATION` error naming the metric.
@@ -247,12 +252,14 @@ gets the whole macro read. `deriveScore` gets more still:
   against what is already on;
 - the asset itself, with its `CoverageValues` for the session.
 
-The v1 formulas report on that context rather than acting on it — `macro_aligned` and
-`cluster_aligned` say whether the top-down reads back the decision up — but a replacement
-has the full picture in hand.
+`deriveScore` turns that context into `strength` = normalised weighted mean of
+the factor scores, and `conviction` = strength magnitude × factor **agreement**
+× agent `confidence` — so mixed signals score low conviction even when
+net-positive (the "direction ≠ conviction" rule). It snapshots the exact
+weights, sentiment, agreement, and confidence it used onto the row.
 
-`strength` and `conviction` are the two standardised numbers the directive is derived
-from — see the parameter table below for the thresholds each one gates.
+`strength` and `conviction` are the two standardised numbers the directive is
+derived from — see the parameter table below for the thresholds each one gates.
 
 **All four formulas are v1 placeholders**, marked as such in their own files. Every
 constant in them is a tunable parameter, so calibrating needs no code change, and
@@ -270,10 +277,12 @@ cluster_param  →  global_param  →  built-in defaults
 list` shows the global layer and the resolved result; `janus cluster show` does the same
 for a cluster. An asset with no cluster resolves against `global_param` and the defaults.
 
-Defaults: `d_initiate 1.0`, `conv_initiate 6`, `d_add 1.0`, `conv_add 7`, `conv_hold 4`,
-`d_exit 1.0`, `max_units 4`, `screen_flag_threshold 1.0`, `w_catalyst 1.0`, `w_trend 1.0`,
-`w_secular 1.0`, `w_crowding -1.0`, `risk_budget_base 0.5`, `risk_budget_tilt 0.25`,
-`cluster_bias_weight 1.0`, `cluster_macro_weight 0.5`.
+Defaults (`domain/params.ts` is the authority): `beta_factor 1.0`,
+`screen_threshold 1.0`, `w_catalyst 0.25`, `w_sentiment 0.25`, `w_trend 0.3`,
+`w_regime 0.15`, `w_secular 0.05`, `fear_premium 1.25`, `divergence_boost 0.5`,
+`min_history_bars 200`, `max_units 3`. The reserved directive thresholds
+(`d_initiate 1.0`, `conv_initiate 6`, `d_add 1.0`, `conv_add 7`, `conv_hold 4`,
+`d_exit 1.0`) are read by nothing until the ladder is written.
 
 The macro read is session-wide, so it resolves against the global rung only; a cluster
 read resolves against its own cluster first, like everything else.

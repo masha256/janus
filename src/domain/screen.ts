@@ -2,6 +2,16 @@ import { type Metrics, requireNum } from "./metrics.ts";
 import type { Read } from "./read.ts";
 
 /**
+ * In-file floors for params the resolution chain did not supply. The chain is
+ * cluster_param → global_param → domain/params.ts DEFAULT_PARAMS, so these
+ * only bind when neither the deployment nor the defaults were changed —
+ * they are the last resort, not the source of tuning: real defaults live in
+ * DEFAULT_PARAMS and are what tests pin.
+ */
+const SCREEN_THRESHOLD_FALLBACK = 1.0;
+const BETA_FACTOR_FALLBACK = 1.0;
+
+/**
  * Screening: score is 1..10, confidence is 0..1, and screen_score is
  * score * confidence. The asset flags when screen_score >= screen_threshold.
  * The threshold is returned as a result so it is snapshotted with the row —
@@ -20,12 +30,12 @@ export function deriveScreen(
 ): { flagged: boolean; results: Metrics } {
   const score = requireNum(metrics, "score", 1, 10);
   const confidence = requireNum(metrics, "confidence", 0, 1);
-  const threshold = params["screen_threshold"] ?? 1.0;
+  const threshold = params["screen_threshold"] ?? SCREEN_THRESHOLD_FALLBACK;
   const screenScore = score * confidence;
 
   const regimeSource = cluster ?? macro;
   const regime = requireNum(regimeSource.metrics, "regime", -2, 2);
-  const betaFactor = params["beta_factor"] ?? 1.0;
+  const betaFactor = params["beta_factor"] ?? BETA_FACTOR_FALLBACK;
   const regimeSmile = computeRegimeSmile(regime, betaFactor);
 
   return {

@@ -6,6 +6,17 @@ import type { CoverageValues } from "./coverage.ts";
 
 const clamp = (x: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, x));
 
+/**
+ * In-file floors for params the resolution chain did not supply. The chain is
+ * cluster_param → global_param → domain/params.ts DEFAULT_PARAMS, so these
+ * only bind when neither the deployment nor the defaults were changed —
+ * they are the last resort, not the source of tuning: real defaults live in
+ * DEFAULT_PARAMS and are what tests pin.
+ */
+const FEAR_PREMIUM_FALLBACK = 1.25;
+const DIVERGENCE_BOOST_FALLBACK = 0.5;
+const WEIGHT_FALLBACK = 0;
+
 /** A phase read as the formula sees it: what it observed, what it concluded. */
 export type Screen = Read & { flagged: boolean };
 
@@ -42,18 +53,24 @@ export type ScoreResult = {
  * deriveScore turns the agent's scoring metrics into a direction and conviction.
  *
  * Inputs:
- *   catalyst     -2..+2
- *   trend        -2..+2
- *   secular      -2..+2
- *   crowding     1..100
+ *   catalyst     -2..+2  fresh project-specific news + social velocity (momentum)
+ *   trend        -2..+2  trend/flow conviction
+ *   secular      -2..+2  longer-horizon thesis
+ *   crowding     1..100  aggregate positioning/crowding (contrarian)
  *   capitulation true/false
  *   divergence   true/false
- *   confidence   0..1
+ *   confidence   0..1    agent-supplied quality; missing = 0 (no information)
  *
- * Sentiment is derived from crowding with a divergence booster.
- * Direction is the weighted sum of catalyst, sentiment, trend, the session's regime_smile, and secular, clamped
+ * Sentiment is derived from crowding with a divergence booster and a
+ * deliberate long-side premium: panic is faded harder than greed is.
+ * Direction is the weighted mean of catalyst, sentiment, trend, the session's
+ * regime_smile, and secular, normalised by the total |weight| so retuning a
+ * weight re-scales conviction rather than the raw score itself, then clamped
  * to [-2, 2].
- * Conviction fuses the magnitude of direction confidence: 1 + 9 * ((|D|/2)^0.8 * (Q^0.2)).
+ * Conviction fuses direction magnitude, factor agreement, and the agent's
+ * confidence: 1 + 9 * (|D|/2)^0.8 * agree^0.3 * Q^0.2. Direction is how
+ * bullish/bearish; conviction is strength × agreement across factors × data
+ * quality, so mixed signals score low conviction even when net-positive.
  */
 export function deriveScore(
   metrics: Metrics,
@@ -66,9 +83,21 @@ export function deriveScore(
   const crowding = requireCrowding(metrics);
   const capitulation = Boolean(metrics["capitulation"]);
   const divergence = Boolean(metrics["divergence"]);
-  const confidence = num(metrics, "confidence", num(context.screen?.metrics ?? {}, "confidence", 0));
+  // Confidence is the agent's own 0..1 quality on this read. Absent means
+  // "no information" (0), not "inherit the screen's": the screen's confidence
+  // judged a different question.
+  const confidence = clamp(num(metrics, "confidence", 0), 0, 1);
 
-  const { sentiment, summary } = sentimentFromCrowding(crowding, trend, capitulation, divergence);
+  const fearPremium = params["fear_premium"] ?? FEAR_PREMIUM_FALLBACK;
+  const divergenceBoost = params["divergence_boost"] ?? DIVERGENCE_BOOST_FALLBACK;
+  const { sentiment, summary } = sentimentFromCrowding(
+    crowding,
+    trend,
+    capitulation,
+    divergence,
+    fearPremium,
+    divergenceBoost,
+  );
 
   const screen = context.screen;
   if (screen === null) {
@@ -77,20 +106,43 @@ export function deriveScore(
   const regime = requireNum(screen.results, "regime", -2, 2);
   const regimeSmile = requireNum(screen.results, "regime_smile", -2, 2);
 
-  const wCat = params["w_catalyst"] ?? 0;
-  const wSent = params["w_sentiment"] ?? 0;
-  const wTrend = params["w_trend"] ?? 0;
-  const wRegime = params["w_regime"] ?? 0;
-  const wSecular = params["w_secular"] ?? 0;
+  const wCat = params["w_catalyst"] ?? WEIGHT_FALLBACK;
+  const wSent = params["w_sentiment"] ?? WEIGHT_FALLBACK;
+  const wTrend = params["w_trend"] ?? WEIGHT_FALLBACK;
+  const wRegime = params["w_regime"] ?? WEIGHT_FALLBACK;
+  const wSecular = params["w_secular"] ?? WEIGHT_FALLBACK;
 
-  const direction = clamp(
-    wCat * catalyst + wSent * sentiment + wTrend * trend + wRegime * regimeSmile + wSecular * secular,
-    -2,
-    2,
-  );
+  // Weighted mean, normalised by total |weight| so a retune rescales the
+  // score's sensitivity rather than its absolute magnitude, keeping every
+  // downstream threshold (screen_threshold, d_initiate...) comparable.
+  const contributions: { key: string; weight: number; value: number }[] = [
+    { key: "catalyst", weight: wCat, value: catalyst },
+    { key: "sentiment", weight: wSent, value: sentiment },
+    { key: "trend", weight: wTrend, value: trend },
+    { key: "regime", weight: wRegime, value: regimeSmile },
+    { key: "secular", weight: wSecular, value: secular },
+  ];
+  let weightedSum = 0;
+  let totalAbsWeight = 0;
+  let energy = 0;
+  for (const { weight, value } of contributions) {
+    const c = weight * value;
+    weightedSum += c;
+    totalAbsWeight += Math.abs(weight);
+    energy += Math.abs(c);
+  }
+  const directionRaw = totalAbsWeight === 0 ? 0 : weightedSum / totalAbsWeight;
+  const direction = clamp(directionRaw, -2, 2);
+
+  // Agreement: how much of the weighted energy points the same way as the
+  // net. 1.0 = every factor pushes the same direction; 0.0 = they cancel.
+  // Mixed signals must score low conviction even when net-positive, so it
+  // discounts conviction multiplicatively. The shallow exponent keeps it
+  // sensitive near the extremes without zeroing a mostly-aligned read.
+  const agreement = energy === 0 ? 0 : Math.abs(weightedSum) / energy;
 
   const conviction = clamp(
-    1 + 9 * ((Math.abs(direction) / 2) ** 0.8 * (confidence ** 0.2)),
+    1 + 9 * ((Math.abs(direction) / 2) ** 0.8 * (agreement ** 0.3) * (confidence ** 0.2)),
     1,
     10,
   );
@@ -105,10 +157,16 @@ export function deriveScore(
       w_trend: wTrend,
       w_regime: wRegime,
       w_secular: wSecular,
+      fear_premium: fearPremium,
+      divergence_boost: divergenceBoost,
       sentiment,
       sentiment_summary: summary,
       regime,
       regime_smile: regimeSmile,
+      agreement,
+      confidence,
+      weighted_sum: weightedSum,
+      total_abs_weight: totalAbsWeight,
     },
   };
 }
@@ -140,6 +198,8 @@ function sentimentFromCrowding(
   trend: number,
   capitulation: boolean,
   divergence: boolean,
+  fearPremium: number,
+  divergenceBoost: number,
 ): { sentiment: number; summary: string } {
   let base: number;
   let summary: string;
@@ -167,12 +227,16 @@ function sentimentFromCrowding(
     summary = ">=95 - true euphoria, fade hard";
   }
 
-  let sentiment = base;
+  // Deliberate asymmetry: on a perp book panic bounces are sharper than
+  // tops, so the buy side of the fade is scaled by fear_premium. The greed
+  // side is untouched. The divergence booster widens an already-committed
+  // fade rather than creating one, by divergence_boost.
+  let sentiment = base > 0 ? clamp(base * fearPremium, -2.0, 2.0) : base;
   if (divergence) {
-    if (base === 0) {
-      summary += " (divergence booster skipped: SC_base = 0, no fade direction)";
+    if (sentiment === 0) {
+      summary += " (divergence booster skipped: sentiment = 0, no fade direction)";
     } else {
-      sentiment = clamp(base + Math.sign(base) * 0.5, -2.0, 2.0);
+      sentiment = clamp(sentiment + Math.sign(sentiment) * divergenceBoost, -2.0, 2.0);
       summary += " + divergence booster";
     }
   }

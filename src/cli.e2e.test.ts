@@ -116,14 +116,36 @@ test("an unknown command fails with VALIDATION and exit 1", async () => {
   assert.equal(body.error.code, "VALIDATION");
 });
 
+test("an asset whose cached listing age is too short cannot be added", async () => {
+  await janus("market", "sync");
+  // Gate is driven from the cached market row alone — no candles fetch. The
+  // fixture symbols are all real listing dates that age with wall-clock time,
+  // so asserting a specific one *fails* is brittle. Assert the mechanism
+  // instead: the failure names listing age/bars, and param override opens it.
+  // DIA is fixture-dated 2026-03-03 — in the future relative to real run time,
+  // so its cached age is ≤ 0 and it is the one symbol that fails on any date.
+  const res = await janus("asset", "add", "DIA", "--class", "etf");
+  assert.equal(res.code, 1);
+  assert.equal(res.body.error.code, "INSUFFICIENT_HISTORY");
+  assert.match(res.body.error.message, /listed/);
+  assert.match(res.body.error.message, /bars/);
+
+  // The gate is param-driven: dropping min_history_bars lets the young market in.
+  await janus("param", "set", "min_history_bars", "0");
+  const dia = await janus("asset", "add", "DIA", "--class", "etf");
+  assert.equal(dia.body.ok, true, JSON.stringify(dia.body));
+  const cleanup = await janus("asset", "rm", "DIA");
+  assert.equal(cleanup.body.ok, true, JSON.stringify(cleanup.body));
+});
+
 test("the full daily pipeline runs end to end", async () => {
   const synced = await janus("market", "sync");
   assert.equal(synced.body.ok, true, JSON.stringify(synced.body));
   assert.equal(synced.body.data.synced, 3, "orderBooks fixture lists 3 markets");
 
   await janus("cluster", "add", "majors", "--name", "Majors");
-  // orderBooks only carries XPL/CC/DIA (no BTC), so the roster addition has
-  // to target a symbol market sync actually populated.
+  // XPL (2025-08-26) is the only fixture symbol old enough that min_history_bars
+  // opens on its real cached listing age for the foreseeable future.
   const added = await janus("asset", "add", "XPL", "--class", "crypto", "--cluster", "majors");
   assert.equal(added.body.ok, true, JSON.stringify(added.body));
 
@@ -205,30 +227,35 @@ test("the full daily pipeline runs end to end", async () => {
     "score", "record", "XPL",
     "--factor", "catalyst=2", "--factor", "trend=2",
     "--factor", "secular=-2", "--factor", "crowding=50",
-    "--factor", "divergence=0",
+    "--factor", "divergence=0", "--factor", "confidence=1",
   );
   assert.equal(scored.body.ok, true, JSON.stringify(scored.body));
   assert.equal(scored.body.data.directive, "NONE", "the directive is stubbed for now");
   assert.equal(scored.body.data.position, "flat");
   // The factors exactly as the agent gave them…
   assert.deepEqual(scored.body.data.metrics, {
-    catalyst: 2, trend: 2, secular: -2, crowding: 50, divergence: 0,
+    catalyst: 2, trend: 2, secular: -2, crowding: 50, divergence: 0, confidence: 1,
   });
   // …and everything the formula concluded, including the session's own
   // screen-stored regime_smile. Regime 0.5 is in the core, so cluster
   // regime_smile is +0.3 and the bullish score aligns with it.
   const results = scored.body.data.results as Record<string, unknown>;
+  const volatile = new Set(["sentiment", "agreement", "weighted_sum"]);
   assert.deepEqual(
-    Object.fromEntries(Object.keys(results).filter((k) => k !== "sentiment" && k !== "cluster_aligned" && k !== "macro_aligned").map((k) => [k, results[k]])),
+    Object.fromEntries(Object.keys(results).filter((k) => !volatile.has(k)).map((k) => [k, results[k]])),
     {
-      w_catalyst: 0.3, w_sentiment: 0.25, w_trend: 0.25, w_regime: 0.15, w_secular: 0.05,
+      w_catalyst: 0.25, w_sentiment: 0.25, w_trend: 0.3, w_regime: 0.15, w_secular: 0.05,
+      fear_premium: 1.25,
+      divergence_boost: 0.5,
       sentiment_summary: "40-65 - calm middle (+0.4 x sign(Trend))",
       regime: 0.5,
       regime_smile: 0.3,
+      confidence: 1,
+      total_abs_weight: 1,
     },
   );
-  assert.ok(typeof results["sentiment"] === "number" && Math.abs(results["sentiment"] as number - 0.4) < 1e-9);
-  // cluster_aligned / macro_aligned are no longer produced by deriveScore.
+  assert.ok(typeof results["sentiment"] === "number" && Math.abs(results["sentiment"] as number - 0.5) < 1e-9);
+  assert.ok(typeof results["agreement"] === "number" && results["agreement"] as number > 0 && results["agreement"] as number <= 1);
 
   // strength and conviction are columns, so a score list can sort and filter on
   // them without touching the result table.
@@ -262,26 +289,19 @@ test("scoring against a nonexistent session is refused", async () => {
 });
 
 test("scoring a screened-but-unflagged asset is refused with NOT_FLAGGED", async () => {
-  // A real current session already exists from the pipeline test above.
-  // Add a second roster asset and cover it, but screen it below the flag
-  // threshold (rather than skipping screen entirely) so screen_at stays
-  // reachable — scoreQueue only pulls flagged rows (or open trades), so an
-  // asset that was screened and came in under threshold is off the queue
-  // without leaving the screen phase looking incomplete.
-  const added = await janus("asset", "add", "CC", "--class", "crypto");
-  assert.equal(added.body.ok, true, JSON.stringify(added.body));
-
-  const coverage = await janus("coverage", "run");
-  assert.equal(coverage.body.ok, true, JSON.stringify(coverage.body));
-
-  const screen = await janus("screen", "record", "CC", "--metric", "score=1", "--metric", "confidence=0.5");
+  // A real current session already exists from the pipeline test above, with
+  // XPL on the roster and covered. Screen it below the flag threshold so it is
+  // genuinely "screened but unflagged", then scoring must refuse NOT_FLAGGED.
+  const screen = await janus(
+    "screen", "record", "XPL", "--metric", "score=1", "--metric", "confidence=0.5",
+  );
   assert.equal(screen.body.ok, true, JSON.stringify(screen.body));
   assert.equal(screen.body.data.flagged, false);
 
-  const res = await janus("score", "record", "CC", "--factor", "catalyst=1", "--factor", "crowding=50");
-  assert.equal(res.code, 1);
+  const res = await janus("score", "record", "XPL", "--factor", "catalyst=1", "--factor", "crowding=50");
+  assert.equal(res.code, 1, JSON.stringify(res.body));
   // If the session rolled to a new NY date, the phase-order guard fires first.
-  assert.ok(res.body.error.code === "NOT_FLAGGED" || res.body.error.code === "PHASE_ORDER");
+  assert.ok(res.body.error.code === "NOT_FLAGGED" || res.body.error.code === "PHASE_ORDER", JSON.stringify(res.body));
 });
 
 test("an open position reaches the next scoring run", async () => {
@@ -307,6 +327,7 @@ test("an open position reaches the next scoring run", async () => {
     "--factor", "secular=2", "--factor", "crowding=50",
     "--factor", "divergence=0",
   );
+  assert.equal(rescored.body.ok, true, JSON.stringify(rescored.body));
   assert.equal(rescored.body.data.position, "long:1");
   assert.equal(rescored.body.data.directive, "NONE");
 

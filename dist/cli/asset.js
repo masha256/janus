@@ -1,8 +1,12 @@
 import { Command } from "commander";
 import { ASSET_CLASSES, addAsset, listAssets, requireAssetBySymbol, updateAsset, setAssetActive, removeAsset, } from "../db/repo/asset.js";
+import { getMarketBySymbol } from "../db/repo/market.js";
+import { resolveParams } from "../domain/params.js";
+import { getGlobalParams } from "../db/repo/cluster.js";
 import { nowIso } from "../domain/session.js";
 import { readText, required, oneOf, unknownVerb } from "./args.js";
 import { handler, withDb } from "./command.js";
+import { JanusError } from "../output.js";
 const CLASSES = ASSET_CLASSES.join(" | ");
 export function build(emit) {
     const cmd = new Command("asset")
@@ -11,7 +15,7 @@ export function build(emit) {
         throw unknownVerb(undefined, "asset", "add, list, show, set, activate, deactivate, rm");
     });
     cmd.command("add")
-        .description("Add a market to the roster")
+        .description("Add a market to the roster (rejects markets without enough cached history)")
         .argument("[symbol]", "market symbol, e.g. BTC")
         .option("--class <CLASS>", CLASSES)
         .option("--cluster <KEY>", "cluster to file it under")
@@ -50,8 +54,37 @@ export function build(emit) {
     return cmd;
 }
 const upper = (symbol) => required(symbol, "symbol").toUpperCase();
+/**
+ * Last-resort floor for the roster-entry history requirement when the
+ * param chain (cluster_param → global_param → domain/params.ts defaults)
+ * supplied nothing. Real default lives in DEFAULT_PARAMS; this only binds if
+ * both were bypassed. 200 = the daily bars a 200-day MA needs, non-negotiable
+ * for a weeks-to-months swing thesis.
+ */
+const MIN_HISTORY_BARS_FALLBACK = 200;
+const DAY_MS = 86_400_000;
 function add(symbol, opts) {
-    return withDb((db) => addAsset(db, upper(symbol), oneOf(opts.class, "class", ASSET_CLASSES), opts.cluster ?? null, readText(opts.notes) ?? null, nowIso()));
+    return withDb(async (db) => {
+        const sym = upper(symbol);
+        const market = getMarketBySymbol(db, sym);
+        if (market === undefined) {
+            throw new JanusError("NOT_FOUND", `no Lighter market ${sym}; run "janus market sync" first`);
+        }
+        const params = resolveParams({}, getGlobalParams(db));
+        const minBars = params["min_history_bars"] ?? MIN_HISTORY_BARS_FALLBACK;
+        // No network: market sync already cached this market's listed_at, and a bar
+        // a day is a lower bound on what coverage could ever pull. If that number is
+        // short, coverage would never repair it — so refuse here and let the
+        // operator re-run market sync once the market has actually matured.
+        const listedAtMs = Date.parse(market.listed_at);
+        const daysAvailable = Number.isNaN(listedAtMs)
+            ? 0
+            : Math.floor((Date.now() - listedAtMs) / DAY_MS) + 1;
+        if (daysAvailable < minBars) {
+            throw new JanusError("INSUFFICIENT_HISTORY", `${sym} listed ${market.listed_at} gives ≈${daysAvailable} daily bars (< ${minBars}); the 200-day structure is load-bearing, so it cannot be added — re-run market sync if this is stale`);
+        }
+        return addAsset(db, sym, oneOf(opts.class, "class", ASSET_CLASSES), opts.cluster ?? null, readText(opts.notes) ?? null, nowIso());
+    });
 }
 function list(opts) {
     return withDb((db) => {

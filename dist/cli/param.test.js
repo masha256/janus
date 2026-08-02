@@ -9,6 +9,7 @@ import { ensureSession, stampPhase } from "../db/repo/session.js";
 import { upsertMarkets } from "../db/repo/market.js";
 import { addAsset, requireAssetBySymbol } from "../db/repo/asset.js";
 import { recordScreen } from "../db/repo/screen.js";
+import { recordMacro } from "../db/repo/phase.js";
 import { DEFAULT_PARAMS } from "../domain/params.js";
 import { todayNY } from "../domain/session.js";
 import { handle } from "./param.js";
@@ -32,7 +33,8 @@ function freshDbFile() {
     // Deliberately unclustered: this is the asset that was stuck on DEFAULT_PARAMS
     // forever while global_param was unwritable.
     const asset = addAsset(db, "BTC", "crypto", null, null, NOW);
-    recordScreen(db, DATE, asset.id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
+    recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
+    recordScreen(db, DATE, asset.id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
     db.close();
     return file;
 }

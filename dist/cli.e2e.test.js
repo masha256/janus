@@ -103,13 +103,33 @@ test("an unknown command fails with VALIDATION and exit 1", async () => {
     assert.equal(body.ok, false);
     assert.equal(body.error.code, "VALIDATION");
 });
+test("an asset whose cached listing age is too short cannot be added", async () => {
+    await janus("market", "sync");
+    // Gate is driven from the cached market row alone — no candles fetch. The
+    // fixture symbols are all real listing dates that age with wall-clock time,
+    // so asserting a specific one *fails* is brittle. Assert the mechanism
+    // instead: the failure names listing age/bars, and param override opens it.
+    // DIA is fixture-dated 2026-03-03 — in the future relative to real run time,
+    // so its cached age is ≤ 0 and it is the one symbol that fails on any date.
+    const res = await janus("asset", "add", "DIA", "--class", "etf");
+    assert.equal(res.code, 1);
+    assert.equal(res.body.error.code, "INSUFFICIENT_HISTORY");
+    assert.match(res.body.error.message, /listed/);
+    assert.match(res.body.error.message, /bars/);
+    // The gate is param-driven: dropping min_history_bars lets the young market in.
+    await janus("param", "set", "min_history_bars", "0");
+    const dia = await janus("asset", "add", "DIA", "--class", "etf");
+    assert.equal(dia.body.ok, true, JSON.stringify(dia.body));
+    const cleanup = await janus("asset", "rm", "DIA");
+    assert.equal(cleanup.body.ok, true, JSON.stringify(cleanup.body));
+});
 test("the full daily pipeline runs end to end", async () => {
     const synced = await janus("market", "sync");
     assert.equal(synced.body.ok, true, JSON.stringify(synced.body));
     assert.equal(synced.body.data.synced, 3, "orderBooks fixture lists 3 markets");
     await janus("cluster", "add", "majors", "--name", "Majors");
-    // orderBooks only carries XPL/CC/DIA (no BTC), so the roster addition has
-    // to target a symbol market sync actually populated.
+    // XPL (2025-08-26) is the only fixture symbol old enough that min_history_bars
+    // opens on its real cached listing age for the foreseeable future.
     const added = await janus("asset", "add", "XPL", "--class", "crypto", "--cluster", "majors");
     assert.equal(added.body.ok, true, JSON.stringify(added.body));
     // Scoring before screening must be refused.
@@ -134,12 +154,12 @@ test("the full daily pipeline runs end to end", async () => {
     assert.deepEqual(macro.body.data.metrics, { regime: 0.5, vix: 14.2 });
     // No derived results are produced by the macro read yet.
     assert.deepEqual(macro.body.data.results, {});
-    const clusterRead = await janus("cluster", "record", "majors", "--metric", "breadth=0.7");
+    const clusterRead = await janus("cluster", "record", "majors", "--metric", "breadth=0.7", "--metric", "regime=0.5");
     assert.equal(clusterRead.body.ok, true, JSON.stringify(clusterRead.body));
     const reads = await janus("cluster", "reads");
-    assert.deepEqual(reads.body.data.reads[0].metrics, { breadth: 0.7 });
-    // The cluster read derives only regime_smile from the macro regime.
-    assert.deepEqual(reads.body.data.reads[0].results, { regime_smile: 0.3 });
+    assert.deepEqual(reads.body.data.reads[0].metrics, { breadth: 0.7, regime: 0.5 });
+    // The cluster read records no derived results; regime_smile is computed at screen time.
+    assert.deepEqual(reads.body.data.reads[0].results, {});
     const coverage = await janus("coverage", "run");
     assert.equal(coverage.body.ok, true, JSON.stringify(coverage.body));
     assert.equal(coverage.body.data.covered, 1);
@@ -149,30 +169,35 @@ test("the full daily pipeline runs end to end", async () => {
     assert.equal(screen.body.data.flagged, true);
     const screens = await janus("screen", "list");
     assert.deepEqual(screens.body.data.screens[0].metrics, { confidence: 0.5, rvol: 2.1, score: 5 }, "what was observed");
-    assert.deepEqual(screens.body.data.screens[0].results, { screen_score: 2.5, threshold: 1 }, "the derived screen_score and threshold in force");
+    assert.deepEqual(screens.body.data.screens[0].results, { screen_score: 2.5, threshold: 1, regime: 0.5, beta_factor: 1, regime_smile: 0.3 }, "the derived screen_score, threshold, regime, beta_factor, and regime_smile in force");
     const queue = await janus("score", "queue");
     assert.equal(queue.body.data.count, 1);
     assert.equal(queue.body.data.queue[0].queue_reason, "flagged");
-    const scored = await janus("score", "record", "XPL", "--factor", "catalyst=2", "--factor", "trend=2", "--factor", "secular=-2", "--factor", "crowding=50", "--factor", "divergence=0");
+    const scored = await janus("score", "record", "XPL", "--factor", "catalyst=2", "--factor", "trend=2", "--factor", "secular=-2", "--factor", "crowding=50", "--factor", "divergence=0", "--factor", "confidence=1");
     assert.equal(scored.body.ok, true, JSON.stringify(scored.body));
     assert.equal(scored.body.data.directive, "NONE", "the directive is stubbed for now");
     assert.equal(scored.body.data.position, "flat");
     // The factors exactly as the agent gave them…
     assert.deepEqual(scored.body.data.metrics, {
-        catalyst: 2, trend: 2, secular: -2, crowding: 50, divergence: 0,
+        catalyst: 2, trend: 2, secular: -2, crowding: 50, divergence: 0, confidence: 1,
     });
-    // …and everything the formula concluded, including how the session's own
-    // The macro read carries no derived result, so macro_aligned is always 0.
-    // Regime 0.5 is in the core, so cluster regime_smile is +0.3 and the bullish
-    // score aligns with it.
+    // …and everything the formula concluded, including the session's own
+    // screen-stored regime_smile. Regime 0.5 is in the core, so cluster
+    // regime_smile is +0.3 and the bullish score aligns with it.
     const results = scored.body.data.results;
-    assert.deepEqual(Object.fromEntries(Object.keys(results).filter((k) => k !== "sentiment" && k !== "cluster_aligned").map((k) => [k, results[k]])), {
-        w_catalyst: 0.3, w_sentiment: 0.25, w_trend: 0.25, w_regime: 0.15, w_secular: 0.05,
-        sentiment_band: "40-65 - calm middle (+0.4 x sign(Trend))",
-        macro_aligned: 0,
+    const volatile = new Set(["sentiment", "agreement", "weighted_sum"]);
+    assert.deepEqual(Object.fromEntries(Object.keys(results).filter((k) => !volatile.has(k)).map((k) => [k, results[k]])), {
+        w_catalyst: 0.25, w_sentiment: 0.25, w_trend: 0.3, w_regime: 0.15, w_secular: 0.05,
+        fear_premium: 1.25,
+        divergence_boost: 0.5,
+        sentiment_summary: "40-65 - calm middle (+0.4 x sign(Trend))",
+        regime: 0.5,
+        regime_smile: 0.3,
+        confidence: 1,
+        total_abs_weight: 1,
     });
-    assert.ok(typeof results["sentiment"] === "number" && Math.abs(results["sentiment"] - 0.4) < 1e-9);
-    assert.ok(typeof results["cluster_aligned"] === "number" && Math.abs(results["cluster_aligned"] - 1) < 1e-9);
+    assert.ok(typeof results["sentiment"] === "number" && Math.abs(results["sentiment"] - 0.5) < 1e-9);
+    assert.ok(typeof results["agreement"] === "number" && results["agreement"] > 0 && results["agreement"] <= 1);
     // strength and conviction are columns, so a score list can sort and filter on
     // them without touching the result table.
     const scores = await janus("score", "list");
@@ -200,23 +225,16 @@ test("scoring against a nonexistent session is refused", async () => {
     assert.equal(res.body.error.code, "SESSION_MISSING");
 });
 test("scoring a screened-but-unflagged asset is refused with NOT_FLAGGED", async () => {
-    // A real current session already exists from the pipeline test above.
-    // Add a second roster asset and cover it, but screen it below the flag
-    // threshold (rather than skipping screen entirely) so screen_at stays
-    // reachable — scoreQueue only pulls flagged rows (or open trades), so an
-    // asset that was screened and came in under threshold is off the queue
-    // without leaving the screen phase looking incomplete.
-    const added = await janus("asset", "add", "CC", "--class", "crypto");
-    assert.equal(added.body.ok, true, JSON.stringify(added.body));
-    const coverage = await janus("coverage", "run");
-    assert.equal(coverage.body.ok, true, JSON.stringify(coverage.body));
-    const screen = await janus("screen", "record", "CC", "--metric", "score=1", "--metric", "confidence=0.5");
+    // A real current session already exists from the pipeline test above, with
+    // XPL on the roster and covered. Screen it below the flag threshold so it is
+    // genuinely "screened but unflagged", then scoring must refuse NOT_FLAGGED.
+    const screen = await janus("screen", "record", "XPL", "--metric", "score=1", "--metric", "confidence=0.5");
     assert.equal(screen.body.ok, true, JSON.stringify(screen.body));
     assert.equal(screen.body.data.flagged, false);
-    const res = await janus("score", "record", "CC", "--factor", "catalyst=1");
-    assert.equal(res.code, 1);
+    const res = await janus("score", "record", "XPL", "--factor", "catalyst=1", "--factor", "crowding=50");
+    assert.equal(res.code, 1, JSON.stringify(res.body));
     // If the session rolled to a new NY date, the phase-order guard fires first.
-    assert.ok(res.body.error.code === "NOT_FLAGGED" || res.body.error.code === "PHASE_ORDER");
+    assert.ok(res.body.error.code === "NOT_FLAGGED" || res.body.error.code === "PHASE_ORDER", JSON.stringify(res.body));
 });
 test("an open position reaches the next scoring run", async () => {
     const opened = await janus("trade", "open", "XPL", "--direction", "long", "--price", "100", "--stop", "90", "--risk", "100", "--notional", "1000");
@@ -228,6 +246,7 @@ test("an open position reaches the next scoring run", async () => {
     // Re-scoring now sees an open position: it is snapshotted onto the row and
     // handed to deriveScore, which will act on it once the ladder is written.
     const rescored = await janus("score", "record", "XPL", "--force", "--factor", "catalyst=2", "--factor", "trend=2", "--factor", "secular=2", "--factor", "crowding=50", "--factor", "divergence=0");
+    assert.equal(rescored.body.ok, true, JSON.stringify(rescored.body));
     assert.equal(rescored.body.data.position, "long:1");
     assert.equal(rescored.body.data.directive, "NONE");
     const addedUnit = await janus("trade", "add-unit", id, "--price", "110", "--stop", "100", "--risk", "100", "--notional", "1100");

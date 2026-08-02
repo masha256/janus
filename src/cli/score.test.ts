@@ -155,8 +155,10 @@ test("re-scoring replaces the previous metric rows rather than merging them", as
       assert.deepEqual(
         keys("score_result"),
         [
+          "agreement", "confidence", "divergence_boost", "fear_premium",
           "regime", "regime_smile", "sentiment", "sentiment_summary",
-          "w_catalyst", "w_regime", "w_secular", "w_sentiment", "w_trend",
+          "total_abs_weight", "w_catalyst", "w_regime", "w_secular",
+          "w_sentiment", "w_trend", "weighted_sum",
         ],
         "nor stale results",
       );

@@ -5,11 +5,14 @@ import { DEFAULT_PARAMS, resolveParams } from "./params.ts";
 test("defaults match the spec", () => {
   assert.equal(DEFAULT_PARAMS["beta_factor"], 1.0);
   assert.equal(DEFAULT_PARAMS["screen_threshold"], 1.0);
-  assert.equal(DEFAULT_PARAMS["w_catalyst"], 0.3);
+  assert.equal(DEFAULT_PARAMS["w_catalyst"], 0.25);
   assert.equal(DEFAULT_PARAMS["w_sentiment"], 0.25);
-  assert.equal(DEFAULT_PARAMS["w_trend"], 0.25);
+  assert.equal(DEFAULT_PARAMS["w_trend"], 0.3);
   assert.equal(DEFAULT_PARAMS["w_regime"], 0.15);
   assert.equal(DEFAULT_PARAMS["w_secular"], 0.05);
+  assert.equal(DEFAULT_PARAMS["fear_premium"], 1.25);
+  assert.equal(DEFAULT_PARAMS["divergence_boost"], 0.5);
+  assert.equal(DEFAULT_PARAMS["min_history_bars"], 200);
   assert.equal(DEFAULT_PARAMS["max_units"], 3);
 });
 
