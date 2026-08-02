@@ -48,12 +48,12 @@ export type ScoreResult = {
  *   crowding     1..100
  *   capitulation true/false
  *   divergence   true/false
+ *   confidence   0..1
  *
- * A sentiment score (SC) is derived from crowding using the §6 step-2 bands,
- * with a divergence booster in step 4. Direction is the weighted sum of
- * catalyst, sentiment, trend, the session's regime_smile, and secular, clamped
- * to [-2, 2]. Conviction fuses the magnitude of direction with screen
- * confidence: 1 + 9 * ((|D|/2)^0.8 * (Q^0.2)).
+ * Sentiment is derived from crowding with a divergence booster.
+ * Direction is the weighted sum of catalyst, sentiment, trend, the session's regime_smile, and secular, clamped
+ * to [-2, 2].
+ * Conviction fuses the magnitude of direction confidence: 1 + 9 * ((|D|/2)^0.8 * (Q^0.2)).
  */
 export function deriveScore(
   metrics: Metrics,
@@ -66,8 +66,9 @@ export function deriveScore(
   const crowding = requireCrowding(metrics);
   const capitulation = Boolean(metrics["capitulation"]);
   const divergence = Boolean(metrics["divergence"]);
+  const confidence = requireNum(metrics, "confidence", 0, 1);
 
-  const { sc: sentiment, band } = sentimentFromCrowding(crowding, trend, capitulation, divergence);
+  const { sentiment, summary } = sentimentFromCrowding(crowding, trend, capitulation, divergence);
 
   const regimeSmile = num(context.cluster?.results ?? {}, "regime_smile") ?? 0;
 
@@ -82,8 +83,6 @@ export function deriveScore(
     -2,
     2,
   );
-
-  const confidence = context.screen === null ? 0 : requireNum(context.screen.metrics, "confidence", 0, 1);
 
   const conviction = clamp(
     1 + 9 * ((Math.abs(direction) / 2) ** 0.8 * (confidence ** 0.2)),
@@ -102,9 +101,7 @@ export function deriveScore(
       w_regime: wRegime,
       w_secular: wSecular,
       sentiment,
-      sentiment_band: band,
-      macro_aligned: alignment(direction, context.macro.results),
-      cluster_aligned: context.cluster === null ? 0 : alignment(direction, context.cluster.results),
+      sentiment_summary: summary,
     },
   };
 }
@@ -136,49 +133,45 @@ function sentimentFromCrowding(
   trend: number,
   capitulation: boolean,
   divergence: boolean,
-): { sc: number; band: string } {
+): { sentiment: number; summary: string } {
   let base: number;
-  let band: string;
+  let summary: string;
   if (capitulation || P <= 12) {
     base = 2.0;
-    band = "<=12 / capitulation - true panic";
+    summary = "<=12 / capitulation - true panic";
   } else if (P < 25) {
     base = 1.0;
-    band = "12-25 - fear";
+    summary = "12-25 - fear";
   } else if (P < 40) {
     base = 0.75 * (40 - P) / 15.0;
-    band = "25-40 - getting fearful (linear)";
+    summary = "25-40 - getting fearful (linear)";
   } else if (P < 65) {
     const s = trend > 0 ? 1.0 : (trend < 0 ? -1.0 : 0.0);
     base = 0.4 * s;
-    band = "40-65 - calm middle (+0.4 x sign(Trend))";
+    summary = "40-65 - calm middle (+0.4 x sign(Trend))";
   } else if (P < 85) {
     base = -1.0 * (P - 65) / 20.0;
-    band = "65-85 - getting crowded (linear)";
+    summary = "65-85 - getting crowded (linear)";
   } else if (P < 95) {
     base = -1.5;
-    band = "85-95 - greed, fade";
+    summary = "85-95 - greed, fade";
   } else {
     base = -2.0;
-    band = ">=95 - true euphoria, fade hard";
+    summary = ">=95 - true euphoria, fade hard";
   }
 
-  let sc = base;
+  let sentiment = base;
   if (divergence) {
     if (base === 0) {
-      band += " (divergence booster skipped: SC_base = 0, no fade direction)";
+      summary += " (divergence booster skipped: SC_base = 0, no fade direction)";
     } else {
-      sc = clamp(base + Math.sign(base) * 0.5, -2.0, 2.0);
-      band += " + divergence booster";
+      sentiment = clamp(base + Math.sign(base) * 0.5, -2.0, 2.0);
+      summary += " + divergence booster";
     }
   }
-  return { sc, band };
+  return { sentiment, summary };
 }
 
-function alignment(direction: number, results: Metrics): number {
-  const tilt = num(results, "regime_smile") ?? 0;
-  return Math.sign(direction) !== 0 && Math.sign(direction) === Math.sign(tilt) ? 1 : 0;
-}
 
 /**
  * Stub. The ladder that turns strength, conviction, and the open position into
