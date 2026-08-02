@@ -42,14 +42,15 @@ async function withHarness(run: () => Promise<void>): Promise<void> {
 test("cluster record stores whatever metrics the caller supplies", async () => {
   await withHarness(async () => {
     const result = (await handle("record", [
-      "majors", "--date", DATE, "--metric", "breadth=0.7",
+      "majors", "--date", DATE, "--metric", "breadth=0.7", "--metric", "regime=0.5",
     ])) as { recorded: string; read: number };
     assert.equal(result.recorded, "majors");
 
     const list = (await handle("reads", ["--date", DATE])) as
       { reads: { metrics: Record<string, number | string>; results: Record<string, number> }[] };
     assert.equal(list.reads[0]!.metrics["breadth"], 0.7);
-    assert.equal(list.reads[0]!.results["regime_smile"], 0.3);
+    assert.equal(list.reads[0]!.metrics["regime"], 0.5);
+    assert.deepEqual(list.reads[0]!.results, {});
   });
 });
 
@@ -69,7 +70,7 @@ test("cluster with no verb names every verb, roster and phase alike", async () =
 test("cluster list stays the roster, not the session's reads", async () => {
   await withHarness(async () => {
     await handle("record", [
-      "majors", "--date", DATE, "--metric", "breadth=0.7",
+      "majors", "--date", DATE, "--metric", "breadth=0.7", "--metric", "regime=0.5",
     ]);
     const roster = (await handle("list", [])) as { count: number; clusters: unknown[] };
     assert.equal(roster.count, 1);

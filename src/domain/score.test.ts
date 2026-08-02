@@ -8,7 +8,7 @@ import type { Metrics } from "./metrics.ts";
 const flat: ScoreContext = {
   macro: { metrics: {}, results: {} },
   cluster: null,
-  screen: null,
+  screen: { flagged: false, metrics: { score: 1, confidence: 0.5 }, results: { screen_score: 0.5, threshold: 1, regime: 0, regime_smile: 0 } },
   positions: [],
   asset: { symbol: "BTC", class: "crypto", cluster_id: null, coverage: null },
 };
@@ -18,9 +18,18 @@ const ctx = (macroRegime: number, clusterRegime: number | null, confidence = 1):
   macro: { metrics: { regime: macroRegime }, results: {} },
   cluster: clusterRegime === null
     ? null
-    : { metrics: { regime: clusterRegime }, results: { regime_smile: 0.6 * clusterRegime } },
+    : { metrics: { regime: clusterRegime }, results: {} },
   asset: { ...flat.asset, cluster_id: clusterRegime === null ? null : 1 },
-  screen: { flagged: true, metrics: { score: 5, confidence }, results: { screen_score: 5 * confidence, threshold: 1 } },
+  screen: {
+    flagged: true,
+    metrics: { score: 5, confidence },
+    results: {
+      screen_score: 5 * confidence,
+      threshold: 1,
+      regime: clusterRegime ?? macroRegime,
+      regime_smile: 0.6 * (clusterRegime ?? macroRegime),
+    },
+  },
 });
 
 function m(
@@ -43,6 +52,8 @@ test("direction is the weighted sum of factors clamped to [-2, 2]", () => {
   // P=50 -> 40-65 band, trend>0 -> base=0.4
   // direction = 0.3*2 + 0.25*0.4 + 0.25*1 + 0.15*0 + 0.05*(-1) = 0.9
   assert.ok(Math.abs(got.strength - 0.9) < 1e-12, `got ${got.strength}`);
+  assert.equal(got.results["regime"], 0);
+  assert.equal(got.results["regime_smile"], 0);
 });
 
 test("sentiment bands match the crowding lookup", () => {
@@ -62,7 +73,7 @@ test("sentiment bands match the crowding lookup", () => {
       { ...DEFAULT_PARAMS, w_catalyst: 0, w_trend: 0, w_secular: 0, w_regime: 0, w_sentiment: 1 },
     );
     assert.equal(got.strength, expected, `crowding ${crowding}`);
-    assert.equal(got.results["sentiment_band"], band);
+    assert.equal(got.results["sentiment_summary"], band);
   }
 });
 
@@ -80,7 +91,7 @@ test("divergence boosts the sentiment in the same direction", () => {
     { ...DEFAULT_PARAMS, w_catalyst: 0, w_trend: 0, w_secular: 0, w_regime: 0, w_sentiment: 1 },
   );
   assert.equal(boosted.strength, 1.5);
-  assert.match(String(boosted.results["sentiment_band"]), /divergence booster/);
+  assert.match(String(boosted.results["sentiment_summary"]), /divergence booster/);
 });
 
 test("conviction formula uses |direction| and screen confidence", () => {
@@ -103,31 +114,41 @@ test("deriveScore rejects invalid factors and crowding", () => {
   assert.throws(() => deriveScore(m(0, 0, 0, 101, false, false), flat, DEFAULT_PARAMS), /crowding/);
 });
 
+test("deriveScore requires a screen with regime and regime_smile", () => {
+  assert.throws(
+    () => deriveScore(m(2, 0, 0, 50, false, false), { ...flat, screen: null }, DEFAULT_PARAMS),
+    /screen must be recorded before scoring/,
+  );
+  assert.throws(
+    () => deriveScore(
+      m(2, 0, 0, 50, false, false),
+      { ...flat, screen: { flagged: false, metrics: { score: 1, confidence: 0.5 }, results: { screen_score: 0.5, threshold: 1 } } },
+      DEFAULT_PARAMS,
+    ),
+    /regime/,
+  );
+});
+
 test("top-down alignment uses regime_smile", () => {
   // With catalyst/trend/secular flat, direction is just w_regime * regime_smile.
-  // Regime 1.5 -> regime_smile 0.9, so direction is positive and alignment is 1.
+  // Regime 1.5 -> regime_smile 0.9, so direction is positive and aligns with it.
   const bullish = deriveScore(
     m(0, 0, 0, 50, false, false),
     ctx(1.5, 1.5, 1),
     { ...DEFAULT_PARAMS, w_regime: 5, w_sentiment: 0, w_catalyst: 0, w_trend: 0, w_secular: 0 },
   );
   assert.ok(bullish.strength > 0, `strength ${bullish.strength}`);
-  // Macro read carries no derived result, so it can never align.
-  assert.equal(bullish.results["macro_aligned"], 0);
-  assert.equal(bullish.results["cluster_aligned"], 1);
+  assert.ok(Math.abs(bullish.results["regime_smile"] - 0.9) < 1e-12, `got ${bullish.results["regime_smile"]}`);
 
-  // Regime -1.5 -> regime_smile -0.9; with catalyst flat the direction is negative
-  // and cluster alignment is 1. Use a larger bullish catalyst with a smaller
-  // regime weight to flip direction positive and make cluster alignment 0.
-  const bearishContext = ctx(-1.5, -1.5, 1);
-  const against = deriveScore(
-    m(2, 0, 0, 50, false, false),
-    bearishContext,
-    { ...DEFAULT_PARAMS, w_regime: 0.5, w_sentiment: 0, w_catalyst: 1, w_trend: 0, w_secular: 0 },
+  // Without a cluster, the screen would have used the macro regime, so an
+  // unclustered asset still sees the same regime_smile when macro matches.
+  const macroOnly = deriveScore(
+    m(0, 0, 0, 50, false, false),
+    ctx(1.5, null, 1),
+    { ...DEFAULT_PARAMS, w_regime: 5, w_sentiment: 0, w_catalyst: 0, w_trend: 0, w_secular: 0 },
   );
-  assert.ok(against.strength > 0, `strength ${against.strength}`);
-  assert.equal(against.results["macro_aligned"], 0);
-  assert.equal(against.results["cluster_aligned"], 0);
+  assert.ok(macroOnly.strength > 0, `strength ${macroOnly.strength}`);
+  assert.ok(Math.abs(macroOnly.results["regime_smile"] - 0.9) < 1e-12, `got ${macroOnly.results["regime_smile"]}`);
 });
 
 test("the directive is stubbed to NONE until the ladder is written", () => {

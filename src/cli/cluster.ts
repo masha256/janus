@@ -113,18 +113,11 @@ function record(key: string | undefined, opts: RecordOpts): Promise<unknown> {
     // Whatever was recorded goes through as-is; deriveClusterRead decides
     // which metrics it cannot do without and refuses the rest.
     const metrics = metricPairs(opts.metric, "metric");
-    // The cluster's conclusion leans on the whole macro read. Phase order
-    // guarantees one exists — except under --force, where an empty read is
-    // passed along rather than blocking the record.
-    const macro = getMacro(db, session.session_date);
-    if (macro.read === undefined) {
-      throw new JanusError("PHASE_ORDER", "macro read must be recorded before cluster read");
-    }
     const params = resolveParams(getClusterParams(db, cluster.id), getGlobalParams(db));
 
     recordClusterRead(db, session.session_date, cluster.id, {
       metrics,
-      results: deriveClusterRead(metrics, macro, params),
+      results: deriveClusterRead(metrics, { metrics: {}, results: {} }, params),
     }, now);
 
     const reads = listClusterReads(db, session.session_date);

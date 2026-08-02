@@ -66,11 +66,16 @@ export function deriveScore(
   const crowding = requireCrowding(metrics);
   const capitulation = Boolean(metrics["capitulation"]);
   const divergence = Boolean(metrics["divergence"]);
-  const confidence = requireNum(metrics, "confidence", 0, 1);
+  const confidence = num(metrics, "confidence", num(context.screen?.metrics ?? {}, "confidence", 0));
 
   const { sentiment, summary } = sentimentFromCrowding(crowding, trend, capitulation, divergence);
 
-  const regimeSmile = num(context.cluster?.results ?? {}, "regime_smile") ?? 0;
+  const screen = context.screen;
+  if (screen === null) {
+    throw new JanusError("PHASE_ORDER", "screen must be recorded before scoring");
+  }
+  const regime = requireNum(screen.results, "regime", -2, 2);
+  const regimeSmile = requireNum(screen.results, "regime_smile", -2, 2);
 
   const wCat = params["w_catalyst"] ?? 0;
   const wSent = params["w_sentiment"] ?? 0;
@@ -102,6 +107,8 @@ export function deriveScore(
       w_secular: wSecular,
       sentiment,
       sentiment_summary: summary,
+      regime,
+      regime_smile: regimeSmile,
     },
   };
 }

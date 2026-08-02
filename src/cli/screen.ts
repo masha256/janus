@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
 import { requireAssetBySymbol } from "../db/repo/asset.ts";
 import { getClusterParams, getGlobalParams } from "../db/repo/cluster.ts";
+import { getMacro, getClusterRead } from "../db/repo/phase.ts";
 import { recordScreen, listScreen, countCoverage, countScreened } from "../db/repo/screen.ts";
 import { resolveParams } from "../domain/params.ts";
 import { deriveScreen } from "../domain/screen.ts";
@@ -51,10 +52,17 @@ function record(symbol: string | undefined, opts: RecordOpts): Promise<unknown> 
 
     const params = resolveParams(getClusterParams(db, asset.cluster_id), getGlobalParams(db));
 
+    // The screen needs both the current session's macro and (when present)
+    // cluster reads to decide which regime view to consume.
+    const macro = getMacro(db, session.session_date);
+    const cluster = asset.cluster_id === null
+      ? null
+      : getClusterRead(db, session.session_date, asset.cluster_id);
+
     // Whatever was recorded goes through as-is; deriveScreen decides which
     // metrics it cannot do without, and what they mean for the flag.
     const metrics = metricPairs(opts.metric, "metric");
-    const { flagged, results } = deriveScreen(metrics, params);
+    const { flagged, results } = deriveScreen(metrics, macro, cluster, params);
 
     recordScreen(db, session.session_date, asset.id, {
       flagged,

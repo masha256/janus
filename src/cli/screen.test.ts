@@ -11,6 +11,7 @@ import { upsertMarkets } from "../db/repo/market.ts";
 import { addAsset } from "../db/repo/asset.ts";
 import { addCluster, setClusterParam } from "../db/repo/cluster.ts";
 import { upsertCoverage } from "../db/repo/coverage.ts";
+import { recordMacro, recordClusterRead } from "../db/repo/phase.ts";
 import { listScreen } from "../db/repo/screen.ts";
 import { nextPhase, todayNY } from "../domain/session.ts";
 import type { CoverageValues } from "../domain/coverage.ts";
@@ -41,6 +42,7 @@ function freshDbFile(): string {
   const db = openDb(file);
   migrate(db);
   ensureSession(db, DATE, NOW);
+  recordMacro(db, DATE, { metrics: { regime: 1.0 }, results: {}, summary: "bullish" }, NOW);
   stampPhase(db, DATE, "macro", NOW);
   stampPhase(db, DATE, "cluster", NOW);
   stampPhase(db, DATE, "coverage", NOW);
@@ -86,6 +88,7 @@ test("screening snapshots the threshold: a later retune does not rewrite history
     };
     assert.equal(first.results["screen_score"], 2.5);
     assert.equal(first.results["threshold"], 1.0);
+    assert.equal(first.results["regime_smile"], 0.6, "uses macro regime 1.0 for unclustered asset");
     assert.equal(first.flagged, true);
 
     // Retune the global default upward past the already-recorded screen_score.
@@ -97,6 +100,7 @@ test("screening snapshots the threshold: a later retune does not rewrite history
         { results: Record<string, number>; flagged: number }[];
       assert.equal(rows.length, 1);
       assert.equal(rows[0]!.results["threshold"], 1.0, "retuning must not rewrite the snapshotted threshold");
+      assert.equal(rows[0]!.results["regime_smile"], 0.6, "retuning must not rewrite the snapshotted regime_smile");
       assert.equal(rows[0]!.flagged, 1, "retuning must not rewrite the snapshotted flag");
     });
 
@@ -121,6 +125,7 @@ test("cluster override reaches the flag decision", async () => {
         { asset_id: btc.id, values: stubCoverage(100) },
         { asset_id: eth.id, values: stubCoverage(200) },
       ]);
+      recordClusterRead(db, DATE, cluster.id, { metrics: { regime: -1.0 }, results: {} }, NOW);
     });
 
     const btc = (await handle("record", ["BTC", "--metric", "score=5", "--metric", "confidence=0.5"])) as {
@@ -129,6 +134,7 @@ test("cluster override reaches the flag decision", async () => {
     };
     assert.equal(btc.results["threshold"], 5);
     assert.equal(btc.results["screen_score"], 2.5);
+    assert.equal(btc.results["regime_smile"], -0.6, "uses cluster regime -1.0 for clustered asset");
     assert.equal(btc.flagged, false, "2.5 is below the cluster's 5.0 threshold");
 
     const eth = (await handle("record", ["ETH", "--metric", "score=5", "--metric", "confidence=0.5"])) as {
@@ -137,6 +143,7 @@ test("cluster override reaches the flag decision", async () => {
     };
     assert.equal(eth.results["threshold"], 1.0);
     assert.equal(eth.results["screen_score"], 2.5);
+    assert.equal(eth.results["regime_smile"], 0.6, "uses macro regime 1.0 for unclustered asset");
     assert.equal(eth.flagged, true, "2.5 clears the default 1.0 threshold for an unclustered asset");
   });
 });

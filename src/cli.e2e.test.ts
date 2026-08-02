@@ -159,19 +159,19 @@ test("the full daily pipeline runs end to end", async () => {
   assert.deepEqual(macro.body.data.results, {});
 
   const clusterRead = await janus(
-    "cluster", "record", "majors", "--metric", "breadth=0.7",
+    "cluster", "record", "majors", "--metric", "breadth=0.7", "--metric", "regime=0.5",
   );
   assert.equal(clusterRead.body.ok, true, JSON.stringify(clusterRead.body));
 
   const reads = await janus("cluster", "reads");
   assert.deepEqual(
     reads.body.data.reads[0].metrics,
-    { breadth: 0.7 },
+    { breadth: 0.7, regime: 0.5 },
   );
-  // The cluster read derives only regime_smile from the macro regime.
+  // The cluster read records no derived results; regime_smile is computed at screen time.
   assert.deepEqual(
     reads.body.data.reads[0].results,
-    { regime_smile: 0.3 },
+    {},
   );
 
   const coverage = await janus("coverage", "run");
@@ -193,8 +193,8 @@ test("the full daily pipeline runs end to end", async () => {
   );
   assert.deepEqual(
     screens.body.data.screens[0].results,
-    { screen_score: 2.5, threshold: 1 },
-    "the derived screen_score and threshold in force",
+    { screen_score: 2.5, threshold: 1, regime: 0.5, beta_factor: 1, regime_smile: 0.3 },
+    "the derived screen_score, threshold, regime, beta_factor, and regime_smile in force",
   );
 
   const queue = await janus("score", "queue");
@@ -214,21 +214,21 @@ test("the full daily pipeline runs end to end", async () => {
   assert.deepEqual(scored.body.data.metrics, {
     catalyst: 2, trend: 2, secular: -2, crowding: 50, divergence: 0,
   });
-  // …and everything the formula concluded, including how the session's own
-  // The macro read carries no derived result, so macro_aligned is always 0.
-  // Regime 0.5 is in the core, so cluster regime_smile is +0.3 and the bullish
-  // score aligns with it.
+  // …and everything the formula concluded, including the session's own
+  // screen-stored regime_smile. Regime 0.5 is in the core, so cluster
+  // regime_smile is +0.3 and the bullish score aligns with it.
   const results = scored.body.data.results as Record<string, unknown>;
   assert.deepEqual(
-    Object.fromEntries(Object.keys(results).filter((k) => k !== "sentiment" && k !== "cluster_aligned").map((k) => [k, results[k]])),
+    Object.fromEntries(Object.keys(results).filter((k) => k !== "sentiment" && k !== "cluster_aligned" && k !== "macro_aligned").map((k) => [k, results[k]])),
     {
       w_catalyst: 0.3, w_sentiment: 0.25, w_trend: 0.25, w_regime: 0.15, w_secular: 0.05,
-      sentiment_band: "40-65 - calm middle (+0.4 x sign(Trend))",
-      macro_aligned: 0,
+      sentiment_summary: "40-65 - calm middle (+0.4 x sign(Trend))",
+      regime: 0.5,
+      regime_smile: 0.3,
     },
   );
   assert.ok(typeof results["sentiment"] === "number" && Math.abs(results["sentiment"] as number - 0.4) < 1e-9);
-  assert.ok(typeof results["cluster_aligned"] === "number" && Math.abs(results["cluster_aligned"] as number - 1) < 1e-9);
+  // cluster_aligned / macro_aligned are no longer produced by deriveScore.
 
   // strength and conviction are columns, so a score list can sort and filter on
   // them without touching the result table.
@@ -278,7 +278,7 @@ test("scoring a screened-but-unflagged asset is refused with NOT_FLAGGED", async
   assert.equal(screen.body.ok, true, JSON.stringify(screen.body));
   assert.equal(screen.body.data.flagged, false);
 
-  const res = await janus("score", "record", "CC", "--factor", "catalyst=1");
+  const res = await janus("score", "record", "CC", "--factor", "catalyst=1", "--factor", "crowding=50");
   assert.equal(res.code, 1);
   // If the session rolled to a new NY date, the phase-order guard fires first.
   assert.ok(res.body.error.code === "NOT_FLAGGED" || res.body.error.code === "PHASE_ORDER");

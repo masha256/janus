@@ -13,26 +13,16 @@ export function deriveMacroRead(metrics: Metrics, _params: Record<string, number
 }
 
 /**
- * A cluster read: the session's macro `regime` transformed into a bounded
- * `regime_smile` using `beta_factor`. The cluster read records no other derived
- * result.
+ * A cluster read: stores its own view of the top-down regime as `regime`
+ * in -2..2. It deliberately does not compute `regime_smile`; that calculation
+ * moves to the screen phase, which can pick the cluster view when one exists
+ * and fall back to the macro view otherwise.
  */
 export function deriveClusterRead(
-  _metrics: Metrics,
-  macro: Read,
-  params: Record<string, number>,
+  metrics: Metrics,
+  _macro: Read,
+  _params: Record<string, number>,
 ): Metrics {
-  const regime = requireNum(macro.metrics, "regime", -2, 2);
-  const beta = params["beta_factor"] ?? 1.0;
-  return { regime_smile: computeRegimeSmile(regime, beta) };
-}
-
-function computeRegimeSmile(regime: number, beta: number): number {
-  const absR = Math.abs(regime);
-  const core = 0.6 * regime * beta;
-  if (absR < 1.3) return core;
-  if (absR > 1.7) return -Math.sign(regime) * 1.2;
-  const t = (absR - 1.3) / 0.4;
-  const extreme = -Math.sign(regime) * 1.2;
-  return (1 - t) * core + t * extreme;
+  requireNum(metrics, "regime", -2, 2);
+  return {};
 }
