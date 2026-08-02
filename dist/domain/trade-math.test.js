@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { tradeSummary } from "./trade-math.js";
 const unit = (over = {}) => ({
     seq: 1, entry_price: 100, notional: 1000, risk: 100, stop: 90,
-    status: "open", exit_price: null, ...over,
+    status: "open", exit_price: null, funding: 0, tag: null, ...over,
 });
 test("summarises a single open long", () => {
     const s = tradeSummary("long", 100, [unit()]);
@@ -56,6 +56,7 @@ test("an empty unit list is neutral, not a divide by zero", () => {
     const s = tradeSummary("long", 100, []);
     assert.deepEqual(s, {
         open_units: 0, closed_units: 0, total_notional: 0,
-        avg_entry: null, open_risk: 0, realized_pnl: 0, r_multiple: null,
+        avg_entry: null, open_risk: 0, realized_pnl: 0, total_funding: 0,
+        net_pnl: 0, r_multiple: null, net_r_multiple: null,
     });
 });

@@ -2,6 +2,10 @@ const sizeOf = (u) => u.notional / u.entry_price;
 /**
  * Everything here is computed on read. Nothing is stored denormalized, so
  * correcting a unit can never leave a stale total behind.
+ *
+ * Funding is measured at exit, not forecast at entry. It is folded into
+ * `net_pnl` and `net_r_multiple` while `realized_pnl` and `r_multiple` stay
+ * price-only so an operator can compare edge versus carry separately.
  */
 export function tradeSummary(direction, initialRisk, units) {
     const sign = direction === "long" ? 1 : -1;
@@ -11,6 +15,8 @@ export function tradeSummary(direction, initialRisk, units) {
     const openSize = open.reduce((a, u) => a + sizeOf(u), 0);
     const open_risk = open.reduce((a, u) => a + sizeOf(u) * (u.entry_price - u.stop) * sign, 0);
     const realized_pnl = closed.reduce((a, u) => a + sizeOf(u) * ((u.exit_price ?? u.entry_price) - u.entry_price) * sign, 0);
+    const total_funding = closed.reduce((a, u) => a + (u.funding ?? 0), 0);
+    const net_pnl = realized_pnl + total_funding;
     return {
         open_units: open.length,
         closed_units: closed.length,
@@ -18,6 +24,9 @@ export function tradeSummary(direction, initialRisk, units) {
         avg_entry: openSize === 0 ? null : total_notional / openSize,
         open_risk,
         realized_pnl,
+        total_funding,
+        net_pnl,
         r_multiple: closed.length === 0 || initialRisk === 0 ? null : realized_pnl / initialRisk,
+        net_r_multiple: closed.length === 0 || initialRisk === 0 ? null : net_pnl / initialRisk,
     };
 }

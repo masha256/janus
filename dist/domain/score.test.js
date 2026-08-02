@@ -151,6 +151,94 @@ test("top-down alignment uses regime_smile", () => {
     assert.ok(macroOnly.strength > 0, `strength ${macroOnly.strength}`);
     assert.ok(Math.abs(macroOnly.results["regime_smile"] - 0.9) < 1e-12, `got ${macroOnly.results["regime_smile"]}`);
 });
-test("the directive is stubbed to NONE until the ladder is written", () => {
-    assert.equal(deriveScore(m(2, 0, 0, 50, false, false), flat, DEFAULT_PARAMS).directive, "NONE");
+test("a flat asset with no edge and no trend gate stays STAND_ASIDE", () => {
+    assert.equal(deriveScore(m(0, 0, 0, 50, false, false), flat, DEFAULT_PARAMS).directive, "STAND_ASIDE");
+});
+function coverage(over = {}) {
+    return {
+        open: 0, high: 0, low: 0, close: 100, volume: 0,
+        mark_price: 100, index_price: 100, open_interest: 0, daily_change_pct: 0,
+        sma20: 98, sma50: 95, sma200: 90, ema12: 99, ema26: 96, atr14: 5,
+        px_vs_sma20: 2, px_vs_sma50: 5, px_vs_sma200: 10,
+        cross_50_200: "golden", cross_50_200_age: 10, cross_px_50: "above", cross_px_50_age: 10,
+        bars_available: 250, fetched_at: "2026-07-31T12:00:00Z",
+        ...over,
+    };
+}
+const longPos = (units = 1) => ({ side: "long", units });
+const shortPos = (units = 1) => ({ side: "short", units });
+function ctxWithPosition(pos, cov = coverage(), prev = null) {
+    return {
+        ...flat,
+        positions: pos.side === null
+            ? []
+            : [{ asset_id: 1, symbol: "BTC", side: pos.side, units: pos.units }],
+        asset: { ...flat.asset, coverage: cov },
+        previous_score: prev,
+    };
+}
+test("flat + strong bullish + trend gate pass -> INITIATE", () => {
+    const got = deriveScore(m(2, 2, 2, 50, false, false), ctxWithPosition({ side: null, units: 0 }), DEFAULT_PARAMS);
+    assert.equal(got.directive, "INITIATE");
+    assert.equal(got.plan.directive, "INITIATE");
+    assert.equal(got.plan.trend_gate, "pass");
+    assert.equal(got.plan.entry_plan?.side, "long");
+});
+test("flat + strong bullish + trend gate fail -> STAND_ASIDE", () => {
+    const got = deriveScore(m(2, 2, 2, 50, false, false), ctxWithPosition({ side: null, units: 0 }, coverage({ cross_px_50: "below", px_vs_sma50: -5 })), DEFAULT_PARAMS);
+    assert.equal(got.directive, "STAND_ASIDE");
+    assert.equal(got.plan.trend_gate, "fail");
+    assert.equal(got.plan.entry_plan, undefined);
+});
+test("holding long + score flips hard -> EXIT", () => {
+    const got = deriveScore(m(-2, -2, -2, 50, false, false), ctxWithPosition(longPos(2)), DEFAULT_PARAMS);
+    assert.equal(got.directive, "EXIT");
+    assert.equal(got.plan.stop_plan?.action, "hold");
+});
+test("holding long + low conviction -> TRIM if more than one unit", () => {
+    const got = deriveScore(m(1, 0, 0, 50, false, false, 0.3), ctxWithPosition(longPos(2)), DEFAULT_PARAMS);
+    assert.equal(got.directive, "TRIM");
+    assert.equal(got.plan.trim_plan?.target_units, 1);
+});
+test("holding long + low conviction + only one unit -> HOLD", () => {
+    const got = deriveScore(m(1, 0, 0, 50, false, false, 0.3), ctxWithPosition(longPos(1)), DEFAULT_PARAMS);
+    assert.equal(got.directive, "HOLD");
+});
+test("holding long + still aligned + working -> HOLD (most days)", () => {
+    const got = deriveScore(m(1, 1, 1, 50, false, false), ctxWithPosition(longPos(1)), DEFAULT_PARAMS);
+    assert.equal(got.directive, "HOLD");
+    assert.equal(got.plan.reason, "thesis intact");
+});
+test("holding long + regime extreme bullish forces EXIT", () => {
+    const screen = {
+        ...flat.screen,
+        results: { ...flat.screen.results, regime: 2, regime_smile: 2 },
+    };
+    const ctx = {
+        ...ctxWithPosition(longPos(1)),
+        screen,
+    };
+    const got = deriveScore(m(1, 1, 1, 50, false, false), ctx, DEFAULT_PARAMS);
+    assert.equal(got.directive, "EXIT");
+    assert.equal(got.plan.regime_trigger, "extreme_bull");
+});
+test("persistence rule downgrades fresh EXIT to TRIM without actionable signal", () => {
+    const prev = {
+        strength: 1.2, conviction: 8, directive: "HOLD",
+        plan: { directive: "HOLD", reason: "thesis intact", trend_gate: "pass" },
+        results: {},
+    };
+    const got = deriveScore(m(-1, -2, -2, 50, false, false), ctxWithPosition(longPos(2), coverage(), prev), DEFAULT_PARAMS);
+    assert.equal(got.directive, "TRIM");
+    assert.equal(got.plan.persistence_rule, "maintain");
+});
+test("persistence rule allows EXIT when divergence is actionable", () => {
+    const prev = {
+        strength: 1.2, conviction: 8, directive: "HOLD",
+        plan: { directive: "HOLD", reason: "thesis intact", trend_gate: "pass" },
+        results: {},
+    };
+    const got = deriveScore(m(-1, -2, -2, 50, false, true), ctxWithPosition(longPos(2), coverage(), prev), DEFAULT_PARAMS);
+    assert.equal(got.directive, "EXIT");
+    assert.equal(got.plan.persistence_rule, "fresh_signal");
 });

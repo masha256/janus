@@ -13,6 +13,7 @@ export type OpenTradeInput = {
   notional: number;
   thesis: string | null;
   origin_session_date: string | null;
+  tag?: string | null;
 };
 
 export type UnitInput = {
@@ -21,6 +22,7 @@ export type UnitInput = {
   stop: number;
   risk: number;
   notional: number;
+  tag?: string | null;
 };
 
 type TradeRecord = {
@@ -46,6 +48,8 @@ function unitsOf(db: DatabaseSync, tradeId: number): UnitRow[] {
     .all(tradeId) as UnitRow[];
 }
 
+
+
 export function openTrade(db: DatabaseSync, input: OpenTradeInput, now: string): number {
   const held = db
     .prepare("SELECT id FROM trade WHERE asset_id = ? AND status = 'open'")
@@ -59,17 +63,17 @@ export function openTrade(db: DatabaseSync, input: OpenTradeInput, now: string):
 
   db.exec("BEGIN");
   try {
-    db.prepare(
-      `INSERT INTO trade (asset_id, direction, status, opened_on, initial_price, initial_stop,
-                          initial_risk, thesis, origin_session_date, created_at)
-       VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(input.asset_id, input.direction, input.opened_on, input.price, input.stop,
-          input.risk, input.thesis, input.origin_session_date, now);
-    const id = (db.prepare("SELECT last_insert_rowid() AS id").get() as { id: number }).id;
-    db.prepare(
-      `INSERT INTO trade_unit (trade_id, seq, entry_on, entry_price, notional, risk, stop, status)
-       VALUES (?, 1, ?, ?, ?, ?, ?, 'open')`,
-    ).run(id, input.opened_on, input.price, input.notional, input.risk, input.stop);
+  db.prepare(
+    `INSERT INTO trade (asset_id, direction, status, opened_on, initial_price, initial_stop,
+                        initial_risk, thesis, origin_session_date, created_at)
+     VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(input.asset_id, input.direction, input.opened_on, input.price, input.stop,
+        input.risk, input.thesis, input.origin_session_date, now);
+  const id = (db.prepare("SELECT last_insert_rowid() AS id").get() as { id: number }).id;
+  db.prepare(
+    `INSERT INTO trade_unit (trade_id, seq, entry_on, entry_price, notional, risk, stop, status, tag)
+     VALUES (?, 1, ?, ?, ?, ?, ?, 'open', ?)`,
+  ).run(id, input.opened_on, input.price, input.notional, input.risk, input.stop, input.tag ?? null);
     db.exec("COMMIT");
     return id;
   } catch (e) {
@@ -88,9 +92,9 @@ export function addUnit(db: DatabaseSync, tradeId: number, input: UnitInput): nu
     .get(tradeId) as { seq: number };
   const seq = max.seq + 1;
   db.prepare(
-    `INSERT INTO trade_unit (trade_id, seq, entry_on, entry_price, notional, risk, stop, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`,
-  ).run(tradeId, seq, input.entry_on, input.price, input.notional, input.risk, input.stop);
+    `INSERT INTO trade_unit (trade_id, seq, entry_on, entry_price, notional, risk, stop, status, tag)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)`,
+  ).run(tradeId, seq, input.entry_on, input.price, input.notional, input.risk, input.stop, input.tag ?? null);
   return seq;
 }
 
@@ -112,17 +116,19 @@ export function exitUnits(
   price: number,
   exitOn: string,
   seq?: number,
+  funding?: number,
 ): { closed: number; trade_status: string } {
   requireTrade(db, tradeId);
   db.exec("BEGIN");
   try {
+    const fundingValue = funding ?? 0;
     const result = seq === undefined
       ? db.prepare(
-          "UPDATE trade_unit SET status='closed', exit_price=?, exit_on=? WHERE trade_id=? AND status='open'",
-        ).run(price, exitOn, tradeId)
+          "UPDATE trade_unit SET status='closed', exit_price=?, exit_on=?, funding=? WHERE trade_id=? AND status='open'",
+        ).run(price, exitOn, fundingValue, tradeId)
       : db.prepare(
-          "UPDATE trade_unit SET status='closed', exit_price=?, exit_on=? WHERE trade_id=? AND seq=? AND status='open'",
-        ).run(price, exitOn, tradeId, seq);
+          "UPDATE trade_unit SET status='closed', exit_price=?, exit_on=?, funding=? WHERE trade_id=? AND seq=? AND status='open'",
+        ).run(price, exitOn, fundingValue, tradeId, seq);
 
     const closed = Number(result.changes);
     if (closed === 0) {

@@ -229,6 +229,11 @@ CREATE TABLE trade_unit (
   UNIQUE (trade_id, seq)
 );
 `,
+    // Add funding and tag to trade_unit. Funding is measured at exit, not
+    // forecast at entry, and folds into Net R. Tag lets the directive ladder
+    // target specific units (runner, core) in its trim/stop plans.
+    `ALTER TABLE trade_unit ADD COLUMN funding REAL DEFAULT 0;
+ALTER TABLE trade_unit ADD COLUMN tag TEXT;`,
 ];
 export function migrate(db) {
     const row = db.prepare("PRAGMA user_version").get();

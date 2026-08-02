@@ -2,24 +2,25 @@ import { Command } from "commander";
 import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
 import { requireAssetBySymbol } from "../db/repo/asset.ts";
 import { getClusterParams, getGlobalParams } from "../db/repo/cluster.ts";
-import { scoreQueue, positionOf, openPositions, recordScore, listScores } from "../db/repo/score.ts";
+import { scoreQueue, positionOf, openPositions, recordScore, listScores, previousScore, getScore } from "../db/repo/score.ts";
 import { getMacro, getClusterRead } from "../db/repo/phase.ts";
 import { listCoverage, getCoverage } from "../db/repo/coverage.ts";
 import { listScreen, getScreen } from "../db/repo/screen.ts";
 import { resolveParams } from "../domain/params.ts";
-import { deriveScore } from "../domain/score.ts";
-import { formatPosition } from "../domain/directive.ts";
+import { deriveScore, type ScoreResult } from "../domain/score.ts";
+import { formatPosition, planResults } from "../domain/directive.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
 import { pairs, readText, required, unknownVerb } from "./args.ts";
 import { collect, type Emit, handler, withDb } from "./command.ts";
 import { JanusError } from "../output.ts";
+import { scorePlanFromResults } from "../domain/directive.ts";
 
 type RecordOpts = { factor: string[]; rationale?: string; date?: string; force?: boolean };
 
 export function build(emit: Emit): Command {
   const cmd = new Command("score")
     .description("The weighted decision for everything in the queue (phase 5)")
-    .action(() => { throw unknownVerb(undefined, "score", "queue, record, list"); });
+    .action(() => { throw unknownVerb(undefined, "score", "queue, record, show, list"); });
 
   cmd.command("queue")
     .description("What needs scoring: flagged this session, plus anything holding an open trade")
@@ -34,6 +35,12 @@ export function build(emit: Emit): Command {
     .option("--date <YYYY-MM-DD>", "address an existing session")
     .option("--force", "run out of phase order")
     .action(async (symbol: string | undefined, opts: RecordOpts) => emit(await record(symbol, opts)));
+
+  cmd.command("show")
+    .description("Reprint today's stored score and plan for one asset")
+    .argument("[symbol]", "market symbol")
+    .option("--date <YYYY-MM-DD>", "address an existing session")
+    .action(async (symbol: string | undefined, opts: { date?: string }) => emit(await show(symbol, opts.date)));
 
   cmd.command("list")
     .description("The scores recorded for a session, strongest first")
@@ -89,6 +96,8 @@ function record(symbol: string | undefined, opts: RecordOpts): Promise<unknown> 
 
     const params = resolveParams(getClusterParams(db, asset.cluster_id), getGlobalParams(db));
     // Everything the session already concluded, top down, plus the whole book.
+    // The previous score is loaded so the persistence rule can resist flip-flopping.
+    const previous = previousScore(db, asset.id, session.session_date);
     const context = {
       macro: getMacro(db, session.session_date),
       cluster: asset.cluster_id === null
@@ -102,9 +111,10 @@ function record(symbol: string | undefined, opts: RecordOpts): Promise<unknown> 
         cluster_id: asset.cluster_id,
         coverage: getCoverage(db, session.session_date, asset.id),
       },
+      previous_score: previous,
     };
 
-    const { strength, conviction, directive, results } = deriveScore(factors, context, params);
+    const { strength, conviction, directive, plan, results } = deriveScore(factors, context, params);
     const position = positionOf(db, asset.id);
 
     recordScore(db, session.session_date, asset.id, {
@@ -114,7 +124,8 @@ function record(symbol: string | undefined, opts: RecordOpts): Promise<unknown> 
       rationale: readText(opts.rationale) ?? null,
       // The factors as given; everything else the formula concluded alongside.
       metrics: factors,
-      results,
+      results: { ...results, ...planResults(plan), plan_directive: plan.directive },
+      plan,
     }, now);
 
     const scored = (listScores(db, session.session_date) as unknown[]).length;
@@ -129,8 +140,43 @@ function record(symbol: string | undefined, opts: RecordOpts): Promise<unknown> 
       queue_reason: entry.queue_reason,
       metrics: factors,
       results,
+      plan,
       scored, of: entries.length,
       phase_complete: complete,
+    };
+  });
+}
+
+function show(symbol: string | undefined, date?: string): Promise<unknown> {
+  return withDb((db) => {
+    const on = readSessionDate(db, date, nowIso());
+    const asset = requireAssetBySymbol(db, required(symbol, "symbol").toUpperCase());
+    const entry = scoreQueue(db, on).find((q) => q.asset_id === asset.id);
+    if (entry === undefined) {
+      throw new JanusError(
+        "NOT_FLAGGED",
+        `${asset.symbol} is not in the scoring queue for ${on}`,
+      );
+    }
+    const row = getScore(db, on, asset.id);
+    if (row === undefined) {
+      throw new JanusError(
+        "NOT_FOUND",
+        `${asset.symbol} has not been scored for ${on}; run score record first`,
+      );
+    }
+    return {
+      session_date: on,
+      symbol: row.symbol,
+      class: row.class,
+      strength: row.strength,
+      conviction: row.conviction,
+      directive: row.directive,
+      position: row.position_state,
+      queue_reason: row.queue_reason,
+      metrics: row.metrics,
+      results: row.results,
+      plan: row.plan,
     };
   });
 }

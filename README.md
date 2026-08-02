@@ -169,8 +169,9 @@ none of that touches the reads, so it can run first, alongside them, or on a day
 reads anything. Everything downstream still waits for it, and `screen` still waits for
 the reads.
 
-1. **`macro`** — one macro read for the session: state and summary on the row, plus any
-   number of `--metric key=value` pairs for what was observed. Completes immediately. If
+1. **`macro`** — one macro read for the session: summary plus any number of
+   `--metric key=value` pairs for what was observed. The `state` column is not exposed
+   through the CLI; it stays `NEUTRAL` until a future release. Completes immediately. If
    no clusters exist, it vacuously completes `cluster` too.
 2. **`cluster record`** — one read per cluster, again as `--metric` pairs. Completes once
    every cluster has been read. It shares the `cluster` command with the roster verbs, so
@@ -280,28 +281,35 @@ for a cluster. An asset with no cluster resolves against `global_param` and the 
 Defaults (`domain/params.ts` is the authority): `beta_factor 1.0`,
 `screen_threshold 1.0`, `w_catalyst 0.25`, `w_sentiment 0.25`, `w_trend 0.3`,
 `w_regime 0.15`, `w_secular 0.05`, `fear_premium 1.25`, `divergence_boost 0.5`,
-`min_history_bars 200`, `max_units 3`. The reserved directive thresholds
-(`d_initiate 1.0`, `conv_initiate 6`, `d_add 1.0`, `conv_add 7`, `conv_hold 4`,
-`d_exit 1.0`) are read by nothing until the ladder is written.
+`min_history_bars 200`, `max_units 3`.
+
+Directive ladder thresholds are active: `d_initiate 1.0`, `conv_initiate 6`,
+`d_add 1.0`, `conv_add 7`, `conv_hold 4`, `d_exit 1.0`. Trend/MA structure is a
+hard entry/scaling gate via `trend_gate_long 1.0`, `trend_gate_short -1.0`,
+`require_golden_for_long 1`, `require_death_for_short 1`. Regime is context plus
+an extreme-contrarian trigger: `regime_trigger_long_max 1.5`,
+`regime_trigger_short_min -1.5`, `regime_force_exit_threshold 1.8`. The persistence
+rule resists flip-flopping unless an actionable signal appears:
+`actionable_catalyst_min 1.5`, `actionable_strength_delta 2.5`.
 
 The macro read is session-wide, so it resolves against the global rung only; a cluster
 read resolves against its own cluster first, like everything else.
 
-### The directive ladder — not yet written
+### The directive ladder
 
-`deriveScore` returns a `directive` alongside `strength` and `conviction`, but it is a
-**stub: every score concludes `NONE`.** The ladder that turns a score and an open position
-into INITIATE/ADD/HOLD/TRIM/EXIT is still to be designed, and it belongs in
-`deriveScore` — which already receives the whole context it will need.
+`deriveScore` now turns `strength`, `conviction`, the open position, the trend/MA gate,
+and the regime trigger into `INITIATE`/`ADD`/`HOLD`/`TRIM`/`EXIT`/`STAND_ASIDE`. Most runs
+return `HOLD` — meaning thesis intact — unless an actionable new signal appears or the
+score flips hard enough to force an exit. The ladder also returns an actionable sub-plan
+(`plan`) with trend-gate status, persistence rule, and stop/trim hints; the operator
+still executes every change manually via the `trade` commands.
 
-These parameters are reserved for it and are read by nothing today:
-
-| Parameter | Intended to guard |
+| Parameter | Guards |
 | --- | --- |
-| `d_initiate`, `conv_initiate` | Flat → `INITIATE`; otherwise `STAND_ASIDE` |
-| `d_add`, `conv_add` | Holding something that is working → `ADD` another unit |
-| `conv_hold` | The conviction floor for staying put; below it, `TRIM` |
-| `d_exit` | How hard the score must argue *against* an open position to make it a full `EXIT` rather than a `TRIM` |
+| `d_initiate`, `conv_initiate` | Flat + trend gate pass → `INITIATE` |
+| `d_add`, `conv_add` | Holding + working + trend gate pass → `ADD` |
+| `conv_hold` | The conviction floor; below it, `TRIM` or `HOLD` |
+| `d_exit` | How hard the score must argue against an open position to become `EXIT` |
 | `max_units` | The ceiling on stacked adds |
 
 The `d_*` names predate `strength`; they mean the same number.
@@ -342,7 +350,7 @@ janus asset rm <symbol>                             refused once the asset has t
 janus session status [--date D]
 janus session list [--limit N]
 
-janus macro record --state STATE --summary - --metric k=v [--metric k=v ...]
+janus macro record --summary - --metric k=v [--metric k=v ...]
 janus macro reads [--date D]
 
 janus cluster record <cluster> --metric k=v [--metric k=v ...]
@@ -356,19 +364,63 @@ janus screen list [--flagged] [--date D]
 
 janus score queue [--date D]
 janus score record <symbol> --factor key=value ... [--rationale -]
+janus score show <symbol> [--date D]
 janus score list [--date D]
 
 janus trade open <symbol> --direction long|short --price P --stop S --risk R
-                 --notional N [--thesis -] [--date D]
-janus trade add-unit <trade_id> --price P --stop S --risk R --notional N [--date D]
+                 --notional N [--thesis -] [--tag core|runner] [--date D]
+janus trade add-unit <trade_id> --price P --stop S --risk R --notional N
+                     [--tag core|runner] [--date D]
 janus trade set-stop <trade_id> --stop S [--unit SEQ]
-janus trade exit <trade_id> --price P [--unit SEQ] [--date D]
+janus trade exit <trade_id> --price P [--unit SEQ] [--funding N] [--date D]
 janus trade list [--open] [--closed] [--asset SYM[,SYM...]]
 janus trade show <trade_id>
 ```
 
+### Position management examples
+
+These are manual operator workflows. `janus` recommends via the score plan; execution
+stays with the human.
+
+Open the first unit of a long swing, tag it `core` so the ladder knows which unit to
+protect first:
+
+```
+janus trade open BTC --direction long --price 65000 --stop 62000 --risk 500 --notional 5000 --tag core
+```
+
+Add a runner unit once the score plan calls `ADD` and the trend gate passes:
+
+```
+janus trade add-unit 1 --price 68000 --stop 66000 --risk 400 --notional 4000 --tag runner
+```
+
+Move the stop on the oldest unit to breakeven after the plan suggests it, leaving the
+runner's stop wider:
+
+```
+janus trade set-stop 1 --stop 65000 --unit 1
+```
+
+Trim one unit when the score plan calls `TRIM`; exit the newest unit to keep the core:
+
+```
+janus trade exit 1 --price 67500 --unit 2
+```
+
+Exit the whole position and record the funding paid over the hold so `Net R` includes it:
+
+```
+janus trade exit 1 --price 71000 --funding -120
+```
+
+Check the open position's plan for today without re-entering factors:
+
+```
+janus score show BTC
+```
+
 `--class` is one of `crypto`, `equity`, `etf`, `commodity`, `fx`, `index`.
-`--state` is one of `RISK_ON`, `NEUTRAL`, `RISK_OFF`.
 `--direction` is required — there is no default, because a short logged as a long
 inverts every directive derived from it.
 

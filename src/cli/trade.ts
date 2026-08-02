@@ -15,11 +15,11 @@ const RISK_MAX = Number.MAX_SAFE_INTEGER;
 // `--date` on trade is the real entry or exit date of a unit, not a session address.
 type OpenOpts = {
   direction?: string; price?: string; stop?: string; risk?: string;
-  notional?: string; thesis?: string; date?: string;
+  notional?: string; thesis?: string; date?: string; tag?: string;
 };
-type UnitOpts = { price?: string; stop?: string; risk?: string; notional?: string; date?: string };
+type UnitOpts = { price?: string; stop?: string; risk?: string; notional?: string; date?: string; tag?: string };
 type StopOpts = { stop?: string; unit?: string };
-type ExitOpts = { price?: string; unit?: string; date?: string };
+type ExitOpts = { price?: string; unit?: string; date?: string; funding?: string };
 
 function tradeId(raw: string | undefined): number {
   const id = Number(required(raw, "trade_id"));
@@ -53,6 +53,7 @@ export function build(emit: Emit): Command {
     .option("--risk <N>", "risk in account terms; 0 is allowed (free carry)")
     .option("--notional <N>", "position size")
     .option("--thesis <TEXT>", "free text; - reads stdin")
+    .option("--tag <TEXT>", "unit tag, e.g. runner or core")
     .option("--date <YYYY-MM-DD>", "the real entry date, not a session address")
     .action(async (symbol: string | undefined, opts: OpenOpts) => emit(await open(symbol, opts)));
 
@@ -64,6 +65,7 @@ export function build(emit: Emit): Command {
     .option("--risk <N>", "risk in account terms")
     .option("--notional <N>", "size of this unit")
     .option("--date <YYYY-MM-DD>", "the real entry date")
+    .option("--tag <TEXT>", "unit tag, e.g. runner or core")
     .action(async (id: string | undefined, opts: UnitOpts) => emit(await add(id, opts)));
 
   cmd.command("set-stop")
@@ -78,6 +80,7 @@ export function build(emit: Emit): Command {
     .argument("[trade_id]", "trade id")
     .option("--price <N>", "exit price")
     .option("--unit <SEQ>", "restrict to one unit")
+    .option("--funding <N>", "funding paid/received over the hold; negative = cost")
     .option("--date <YYYY-MM-DD>", "the real exit date")
     .action(async (id: string | undefined, opts: ExitOpts) => emit(await exit(id, opts)));
 
@@ -111,6 +114,7 @@ function open(symbol: string | undefined, opts: OpenOpts): Promise<unknown> {
       notional: positive(opts.notional, "notional"),
       thesis: readText(opts.thesis) ?? null,
       origin_session_date: session === undefined ? null : session.session_date,
+      tag: opts.tag ?? null,
     }, nowIso());
     return getTrade(db, id);
   });
@@ -125,6 +129,7 @@ function add(raw: string | undefined, opts: UnitOpts): Promise<unknown> {
       stop: positive(opts.stop, "stop"),
       risk: num(opts.risk, "risk", 0, RISK_MAX),
       notional: positive(opts.notional, "notional"),
+      tag: opts.tag ?? null,
     });
     return { seq, ...(getTrade(db, id) as object) };
   });
@@ -141,7 +146,8 @@ function stop(raw: string | undefined, opts: StopOpts): Promise<unknown> {
 function exit(raw: string | undefined, opts: ExitOpts): Promise<unknown> {
   return withDb((db) => {
     const id = tradeId(raw);
-    const res = exitUnits(db, id, positive(opts.price, "price"), opts.date ?? todayNY(), unitSeq(opts.unit));
+    const funding = opts.funding === undefined ? undefined : num(opts.funding, "funding", -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+    const res = exitUnits(db, id, positive(opts.price, "price"), opts.date ?? todayNY(), unitSeq(opts.unit), funding);
     return { ...res, ...(getTrade(db, id) as object) };
   });
 }

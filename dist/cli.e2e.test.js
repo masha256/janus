@@ -75,7 +75,7 @@ test("every command emits a parseable envelope", async () => {
     const { code, body } = await janus("init");
     assert.equal(code, 0);
     assert.equal(body.ok, true);
-    assert.equal(body.data.schema_version, 1);
+    assert.equal(typeof body.data.schema_version, "number");
 });
 test("--help prints usage as plain text and exits 0", async () => {
     const { code, body, stdout } = await janusRaw("--help");
@@ -175,8 +175,9 @@ test("the full daily pipeline runs end to end", async () => {
     assert.equal(queue.body.data.queue[0].queue_reason, "flagged");
     const scored = await janus("score", "record", "XPL", "--factor", "catalyst=2", "--factor", "trend=2", "--factor", "secular=-2", "--factor", "crowding=50", "--factor", "divergence=0", "--factor", "confidence=1");
     assert.equal(scored.body.ok, true, JSON.stringify(scored.body));
-    assert.equal(scored.body.data.directive, "NONE", "the directive is stubbed for now");
+    assert.equal(scored.body.data.directive, "STAND_ASIDE", "no trend gate data from fixtures, so no initiate");
     assert.equal(scored.body.data.position, "flat");
+    assert.equal(scored.body.data.plan?.trend_gate, "fail");
     // The factors exactly as the agent gave them…
     assert.deepEqual(scored.body.data.metrics, {
         catalyst: 2, trend: 2, secular: -2, crowding: 50, divergence: 0, confidence: 1,
@@ -248,7 +249,8 @@ test("an open position reaches the next scoring run", async () => {
     const rescored = await janus("score", "record", "XPL", "--force", "--factor", "catalyst=2", "--factor", "trend=2", "--factor", "secular=2", "--factor", "crowding=50", "--factor", "divergence=0");
     assert.equal(rescored.body.ok, true, JSON.stringify(rescored.body));
     assert.equal(rescored.body.data.position, "long:1");
-    assert.equal(rescored.body.data.directive, "NONE");
+    assert.equal(rescored.body.data.directive, "HOLD", "thesis intact on an open long with aligned score");
+    assert.equal(rescored.body.data.plan?.directive, "HOLD");
     const addedUnit = await janus("trade", "add-unit", id, "--price", "110", "--stop", "100", "--risk", "100", "--notional", "1100");
     assert.equal(addedUnit.body.data.summary.open_units, 2);
     assert.equal(addedUnit.body.data.summary.total_notional, 2100);

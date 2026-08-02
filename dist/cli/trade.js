@@ -39,6 +39,7 @@ export function build(emit) {
         .option("--risk <N>", "risk in account terms; 0 is allowed (free carry)")
         .option("--notional <N>", "position size")
         .option("--thesis <TEXT>", "free text; - reads stdin")
+        .option("--tag <TEXT>", "unit tag, e.g. runner or core")
         .option("--date <YYYY-MM-DD>", "the real entry date, not a session address")
         .action(async (symbol, opts) => emit(await open(symbol, opts)));
     cmd.command("add-unit")
@@ -49,6 +50,7 @@ export function build(emit) {
         .option("--risk <N>", "risk in account terms")
         .option("--notional <N>", "size of this unit")
         .option("--date <YYYY-MM-DD>", "the real entry date")
+        .option("--tag <TEXT>", "unit tag, e.g. runner or core")
         .action(async (id, opts) => emit(await add(id, opts)));
     cmd.command("set-stop")
         .description("Move the stop on every open unit, or just one")
@@ -61,6 +63,7 @@ export function build(emit) {
         .argument("[trade_id]", "trade id")
         .option("--price <N>", "exit price")
         .option("--unit <SEQ>", "restrict to one unit")
+        .option("--funding <N>", "funding paid/received over the hold; negative = cost")
         .option("--date <YYYY-MM-DD>", "the real exit date")
         .action(async (id, opts) => emit(await exit(id, opts)));
     cmd.command("list")
@@ -90,6 +93,7 @@ function open(symbol, opts) {
             notional: positive(opts.notional, "notional"),
             thesis: readText(opts.thesis) ?? null,
             origin_session_date: session === undefined ? null : session.session_date,
+            tag: opts.tag ?? null,
         }, nowIso());
         return getTrade(db, id);
     });
@@ -103,6 +107,7 @@ function add(raw, opts) {
             stop: positive(opts.stop, "stop"),
             risk: num(opts.risk, "risk", 0, RISK_MAX),
             notional: positive(opts.notional, "notional"),
+            tag: opts.tag ?? null,
         });
         return { seq, ...getTrade(db, id) };
     });
@@ -117,7 +122,8 @@ function stop(raw, opts) {
 function exit(raw, opts) {
     return withDb((db) => {
         const id = tradeId(raw);
-        const res = exitUnits(db, id, positive(opts.price, "price"), opts.date ?? todayNY(), unitSeq(opts.unit));
+        const funding = opts.funding === undefined ? undefined : num(opts.funding, "funding", -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+        const res = exitUnits(db, id, positive(opts.price, "price"), opts.date ?? todayNY(), unitSeq(opts.unit), funding);
         return { ...res, ...getTrade(db, id) };
     });
 }

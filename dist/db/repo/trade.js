@@ -23,11 +23,11 @@ export function openTrade(db, input, now) {
     db.exec("BEGIN");
     try {
         db.prepare(`INSERT INTO trade (asset_id, direction, status, opened_on, initial_price, initial_stop,
-                          initial_risk, thesis, origin_session_date, created_at)
-       VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)`).run(input.asset_id, input.direction, input.opened_on, input.price, input.stop, input.risk, input.thesis, input.origin_session_date, now);
+                        initial_risk, thesis, origin_session_date, created_at)
+     VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)`).run(input.asset_id, input.direction, input.opened_on, input.price, input.stop, input.risk, input.thesis, input.origin_session_date, now);
         const id = db.prepare("SELECT last_insert_rowid() AS id").get().id;
-        db.prepare(`INSERT INTO trade_unit (trade_id, seq, entry_on, entry_price, notional, risk, stop, status)
-       VALUES (?, 1, ?, ?, ?, ?, ?, 'open')`).run(id, input.opened_on, input.price, input.notional, input.risk, input.stop);
+        db.prepare(`INSERT INTO trade_unit (trade_id, seq, entry_on, entry_price, notional, risk, stop, status, tag)
+     VALUES (?, 1, ?, ?, ?, ?, ?, 'open', ?)`).run(id, input.opened_on, input.price, input.notional, input.risk, input.stop, input.tag ?? null);
         db.exec("COMMIT");
         return id;
     }
@@ -45,8 +45,8 @@ export function addUnit(db, tradeId, input) {
         .prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM trade_unit WHERE trade_id = ?")
         .get(tradeId);
     const seq = max.seq + 1;
-    db.prepare(`INSERT INTO trade_unit (trade_id, seq, entry_on, entry_price, notional, risk, stop, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`).run(tradeId, seq, input.entry_on, input.price, input.notional, input.risk, input.stop);
+    db.prepare(`INSERT INTO trade_unit (trade_id, seq, entry_on, entry_price, notional, risk, stop, status, tag)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)`).run(tradeId, seq, input.entry_on, input.price, input.notional, input.risk, input.stop, input.tag ?? null);
     return seq;
 }
 /** Returns the number of units moved. Omitting seq moves every open unit. */
@@ -61,13 +61,14 @@ export function setStop(db, tradeId, stop, seq) {
     return changed;
 }
 /** Omitting seq exits every open unit and closes the trade. */
-export function exitUnits(db, tradeId, price, exitOn, seq) {
+export function exitUnits(db, tradeId, price, exitOn, seq, funding) {
     requireTrade(db, tradeId);
     db.exec("BEGIN");
     try {
+        const fundingValue = funding ?? 0;
         const result = seq === undefined
-            ? db.prepare("UPDATE trade_unit SET status='closed', exit_price=?, exit_on=? WHERE trade_id=? AND status='open'").run(price, exitOn, tradeId)
-            : db.prepare("UPDATE trade_unit SET status='closed', exit_price=?, exit_on=? WHERE trade_id=? AND seq=? AND status='open'").run(price, exitOn, tradeId, seq);
+            ? db.prepare("UPDATE trade_unit SET status='closed', exit_price=?, exit_on=?, funding=? WHERE trade_id=? AND status='open'").run(price, exitOn, fundingValue, tradeId)
+            : db.prepare("UPDATE trade_unit SET status='closed', exit_price=?, exit_on=?, funding=? WHERE trade_id=? AND seq=? AND status='open'").run(price, exitOn, fundingValue, tradeId, seq);
         const closed = Number(result.changes);
         if (closed === 0) {
             throw new JanusError("VALIDATION", `no open unit to exit on trade ${tradeId}`);

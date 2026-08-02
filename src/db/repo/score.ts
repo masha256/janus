@@ -22,6 +22,8 @@ export type ScoreRow = {
   metrics: Metrics;
   /** Everything else the formula concluded, such as the applied weights. */
   results: Metrics;
+  /** Actionable sub-plan from the directive ladder. */
+  plan?: import("../../domain/directive.ts").ScorePlan;
 };
 
 /**
@@ -110,6 +112,94 @@ export function recordScore(
     db.exec("ROLLBACK");
     throw e;
   }
+}
+
+/** The most recent score for an asset before the given session, if any. */
+export function previousScore(
+  db: DatabaseSync,
+  assetId: number,
+  beforeDate: string,
+): import("../../domain/score.ts").ScoreResult | null {
+  const row = db
+    .prepare(
+      `SELECT * FROM score WHERE asset_id = ? AND session_date < ? ORDER BY session_date DESC LIMIT 1`,
+    )
+    .get(assetId, beforeDate) as { session_date: string; asset_id: number; strength: number; conviction: number; directive: string; queue_reason: string; position_state: string; rationale: string | null } | undefined;
+  if (row === undefined) return null;
+  const metrics = metricsByEntity(db, "score_metric", "asset_id", row.session_date);
+  const results = metricsByEntity(db, "score_result", "asset_id", row.session_date);
+    const r = results.get(row.asset_id) ?? {};
+    const plan = scorePlanFromResultsStatic(r);
+    return {
+      strength: row.strength,
+      conviction: row.conviction,
+      directive: row.directive as import("../../domain/directive.ts").Directive,
+      plan: plan ?? {
+        directive: row.directive as import("../../domain/directive.ts").Directive,
+        reason: "recovered from legacy score",
+        trend_gate: "pass",
+      },
+      results: r,
+    };
+  }
+
+function scorePlanFromResultsStatic(
+  results: Record<string, unknown>,
+): import("../../domain/directive.ts").ScorePlan | undefined {
+  const directive = results["plan_directive"] as import("../../domain/directive.ts").Directive | undefined;
+  if (directive === undefined) return undefined;
+  const trend_gate = results["trend_gate"] as "pass" | "fail" | undefined;
+  if (trend_gate === undefined) return undefined;
+  const plan: import("../../domain/directive.ts").ScorePlan = {
+    directive,
+    reason: String(results["directive_reason"] ?? ""),
+    trend_gate,
+    regime_trigger: (results["regime_trigger"] as import("../../domain/directive.ts").ScorePlan["regime_trigger"]) ?? "none",
+    persistence_rule: (results["persistence_rule"] as import("../../domain/directive.ts").ScorePlan["persistence_rule"]) ?? undefined,
+  };
+  const entrySide = results["entry_side"] as "long" | "short" | undefined;
+  if (entrySide !== undefined) {
+    plan.entry_plan = {
+      side: entrySide,
+      max_units: Number(results["entry_max_units"] ?? 0),
+    };
+  }
+  const stopAction = results["stop_action"] as NonNullable<import("../../domain/directive.ts").ScorePlan["stop_plan"]>["action"] | undefined;
+  if (stopAction !== undefined) {
+    plan.stop_plan = {
+      action: stopAction,
+      affected_units: String(results["stop_affected_units"] ?? "all") as NonNullable<import("../../domain/directive.ts").ScorePlan["stop_plan"]>["affected_units"],
+      rationale: String(results["stop_rationale"] ?? ""),
+    };
+  }
+  const trimTarget = results["trim_target_units"] as number | undefined;
+  if (trimTarget !== undefined) {
+    plan.trim_plan = {
+      target_units: Number(trimTarget),
+      which: String(results["trim_which"] ?? "oldest") as NonNullable<import("../../domain/directive.ts").ScorePlan["trim_plan"]>["which"],
+    };
+  }
+  return plan;
+}
+
+export function getScore(
+  db: DatabaseSync,
+  date: string,
+  assetId: number,
+): { session_date: string; asset_id: number; symbol: string; class: string; strength: number; conviction: number; directive: string; queue_reason: string; position_state: string; rationale: string | null; metrics: Metrics; results: Metrics; plan: import("../../domain/directive.ts").ScorePlan | undefined } | undefined {
+  const row = db
+    .prepare(
+      `SELECT a.symbol, a.class, s.* FROM score s
+       JOIN asset a ON a.id = s.asset_id
+       WHERE s.session_date = ? AND s.asset_id = ?`,
+    )
+    .get(date, assetId) as { session_date: string; asset_id: number; symbol: string; class: string; strength: number; conviction: number; directive: string; queue_reason: string; position_state: string; rationale: string | null } | undefined;
+  if (row === undefined) return undefined;
+  const metrics = metricsByEntity(db, "score_metric", "asset_id", date);
+  const results = metricsByEntity(db, "score_result", "asset_id", date);
+  const r = results.get(row.asset_id) ?? {};
+  const plan = scorePlanFromResultsStatic(r);
+  return { ...row, metrics: metrics.get(row.asset_id) ?? {}, results: r, plan };
 }
 
 export function listScores(db: DatabaseSync, date: string): unknown[] {

@@ -2,21 +2,22 @@ import { Command } from "commander";
 import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.js";
 import { requireAssetBySymbol } from "../db/repo/asset.js";
 import { getClusterParams, getGlobalParams } from "../db/repo/cluster.js";
-import { scoreQueue, positionOf, openPositions, recordScore, listScores } from "../db/repo/score.js";
+import { scoreQueue, positionOf, openPositions, recordScore, listScores, previousScore, getScore } from "../db/repo/score.js";
 import { getMacro, getClusterRead } from "../db/repo/phase.js";
 import { listCoverage, getCoverage } from "../db/repo/coverage.js";
 import { listScreen, getScreen } from "../db/repo/screen.js";
 import { resolveParams } from "../domain/params.js";
 import { deriveScore } from "../domain/score.js";
-import { formatPosition } from "../domain/directive.js";
+import { formatPosition, planResults } from "../domain/directive.js";
 import { assertPhaseOrder, nowIso } from "../domain/session.js";
 import { pairs, readText, required, unknownVerb } from "./args.js";
 import { collect, handler, withDb } from "./command.js";
 import { JanusError } from "../output.js";
+import { scorePlanFromResults } from "../domain/directive.js";
 export function build(emit) {
     const cmd = new Command("score")
         .description("The weighted decision for everything in the queue (phase 5)")
-        .action(() => { throw unknownVerb(undefined, "score", "queue, record, list"); });
+        .action(() => { throw unknownVerb(undefined, "score", "queue, record, show, list"); });
     cmd.command("queue")
         .description("What needs scoring: flagged this session, plus anything holding an open trade")
         .option("--date <YYYY-MM-DD>", "defaults to today, New York")
@@ -29,6 +30,11 @@ export function build(emit) {
         .option("--date <YYYY-MM-DD>", "address an existing session")
         .option("--force", "run out of phase order")
         .action(async (symbol, opts) => emit(await record(symbol, opts)));
+    cmd.command("show")
+        .description("Reprint today's stored score and plan for one asset")
+        .argument("[symbol]", "market symbol")
+        .option("--date <YYYY-MM-DD>", "address an existing session")
+        .action(async (symbol, opts) => emit(await show(symbol, opts.date)));
     cmd.command("list")
         .description("The scores recorded for a session, strongest first")
         .option("--date <YYYY-MM-DD>", "defaults to today, New York")
@@ -73,6 +79,8 @@ function record(symbol, opts) {
         }
         const params = resolveParams(getClusterParams(db, asset.cluster_id), getGlobalParams(db));
         // Everything the session already concluded, top down, plus the whole book.
+        // The previous score is loaded so the persistence rule can resist flip-flopping.
+        const previous = previousScore(db, asset.id, session.session_date);
         const context = {
             macro: getMacro(db, session.session_date),
             cluster: asset.cluster_id === null
@@ -86,8 +94,9 @@ function record(symbol, opts) {
                 cluster_id: asset.cluster_id,
                 coverage: getCoverage(db, session.session_date, asset.id),
             },
+            previous_score: previous,
         };
-        const { strength, conviction, directive, results } = deriveScore(factors, context, params);
+        const { strength, conviction, directive, plan, results } = deriveScore(factors, context, params);
         const position = positionOf(db, asset.id);
         recordScore(db, session.session_date, asset.id, {
             strength, conviction, directive,
@@ -96,7 +105,8 @@ function record(symbol, opts) {
             rationale: readText(opts.rationale) ?? null,
             // The factors as given; everything else the formula concluded alongside.
             metrics: factors,
-            results,
+            results: { ...results, ...planResults(plan), plan_directive: plan.directive },
+            plan,
         }, now);
         const scored = listScores(db, session.session_date).length;
         const complete = scored >= entries.length;
@@ -110,8 +120,36 @@ function record(symbol, opts) {
             queue_reason: entry.queue_reason,
             metrics: factors,
             results,
+            plan,
             scored, of: entries.length,
             phase_complete: complete,
+        };
+    });
+}
+function show(symbol, date) {
+    return withDb((db) => {
+        const on = readSessionDate(db, date, nowIso());
+        const asset = requireAssetBySymbol(db, required(symbol, "symbol").toUpperCase());
+        const entry = scoreQueue(db, on).find((q) => q.asset_id === asset.id);
+        if (entry === undefined) {
+            throw new JanusError("NOT_FLAGGED", `${asset.symbol} is not in the scoring queue for ${on}`);
+        }
+        const row = getScore(db, on, asset.id);
+        if (row === undefined) {
+            throw new JanusError("NOT_FOUND", `${asset.symbol} has not been scored for ${on}; run score record first`);
+        }
+        return {
+            session_date: on,
+            symbol: row.symbol,
+            class: row.class,
+            strength: row.strength,
+            conviction: row.conviction,
+            directive: row.directive,
+            position: row.position_state,
+            queue_reason: row.queue_reason,
+            metrics: row.metrics,
+            results: row.results,
+            plan: row.plan,
         };
     });
 }
