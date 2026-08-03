@@ -242,6 +242,34 @@ ALTER TABLE trade_unit ADD COLUMN tag TEXT;`,
   // no-entry cooldown until the event date passes.
   `ALTER TABLE screen ADD COLUMN binary_date TEXT;
 ALTER TABLE screen ADD COLUMN binary_reason TEXT;`,
+
+  // Position sizing and stop-ladder support.
+  // partial_exited: whether this unit has already been partially trimmed.
+  // breakeven_moved_at: when stop was moved to breakeven or better.
+  // time_stop_date: computed deadline for the time-stop rule.
+  // target_price: optional target used to decide if time-stop is triggered.
+  // add_window_open: allows pyramiding only after a partial exit banks profit.
+  `ALTER TABLE trade_unit ADD COLUMN partial_exited INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE trade_unit ADD COLUMN breakeven_moved_at TEXT;
+ALTER TABLE trade_unit ADD COLUMN time_stop_date TEXT;
+ALTER TABLE trade ADD COLUMN target_price REAL;
+ALTER TABLE trade ADD COLUMN add_window_open INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE trade_event (
+  id            INTEGER PRIMARY KEY,
+  trade_id      INTEGER NOT NULL REFERENCES trade(id) ON DELETE CASCADE,
+  unit_seq      INTEGER,
+  event_type    TEXT NOT NULL,
+  event_date    TEXT NOT NULL,
+  old_stop      REAL,
+  new_stop      REAL,
+  old_notional  REAL,
+  new_notional  REAL,
+  price         REAL,
+  r_multiple    REAL,
+  reason        TEXT,
+  recorded_at   TEXT NOT NULL
+);`,
 ];
 
 export function migrate(db: DatabaseSync): number {

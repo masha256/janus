@@ -23,6 +23,9 @@ export function formatPlan(plan) {
     if (plan.trim_plan) {
         parts.push(`trim_to=${plan.trim_plan.target_units}:${plan.trim_plan.which}`);
     }
+    if (plan.sizing_plan) {
+        parts.push(`size=$${Math.round(plan.sizing_plan.suggested_notional)} risk=$${Math.round(plan.sizing_plan.risk_dollars)}`);
+    }
     return parts.join(" | ");
 }
 /** Convert a plan into flat result keys for storage in score_result. */
@@ -49,6 +52,16 @@ export function planResults(plan) {
         r["stop_action"] = plan.stop_plan.action;
         r["stop_affected_units"] = plan.stop_plan.affected_units;
         r["stop_rationale"] = plan.stop_plan.rationale;
+        if (plan.stop_plan.new_stop !== undefined)
+            r["stop_new_stop"] = plan.stop_plan.new_stop;
+    }
+    if (plan.sizing_plan) {
+        r["sizing_suggested_notional"] = plan.sizing_plan.suggested_notional;
+        r["sizing_risk_dollars"] = plan.sizing_plan.risk_dollars;
+        r["sizing_stop_distance_pct"] = plan.sizing_plan.stop_distance_pct;
+        r["sizing_stop_price"] = plan.sizing_plan.stop_price;
+        r["sizing_heat_after_trade"] = plan.sizing_plan.heat_after_trade;
+        r["sizing_per_asset_cap_dollars"] = plan.sizing_plan.per_asset_cap_dollars;
     }
     if (plan.trim_plan) {
         r["trim_target_units"] = plan.trim_plan.target_units;
@@ -89,6 +102,7 @@ export function scorePlanFromResults(results) {
             action: stopAction,
             affected_units: String(results["stop_affected_units"] ?? "all"),
             rationale: String(results["stop_rationale"] ?? ""),
+            new_stop: results["stop_new_stop"] === undefined ? undefined : Number(results["stop_new_stop"]),
         };
     }
     const trimTarget = results["trim_target_units"];

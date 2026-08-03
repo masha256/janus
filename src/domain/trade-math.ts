@@ -8,6 +8,10 @@ export type UnitRow = {
   exit_price: number | null;
   funding: number;
   tag: string | null;
+  // Sizing / ladder fields (optional for backwards compatibility).
+  partial_exited?: number;
+  breakeven_moved_at?: string | null;
+  time_stop_date?: string | null;
 };
 
 export type TradeSummary = {
@@ -24,6 +28,25 @@ export type TradeSummary = {
 };
 
 const sizeOf = (u: UnitRow): number => u.notional / u.entry_price;
+
+/**
+ * Heat for a unit, floored at zero. A stop at or beyond entry contributes
+ * no heat, matching the idea that breakeven/favorable stops free up capacity.
+ */
+export function unitHeat(unit: UnitRow, direction: "long" | "short"): number {
+  const sign = direction === "long" ? 1 : -1;
+  const size = sizeOf(unit);
+  return Math.max(0, size * (unit.entry_price - unit.stop) * sign);
+}
+
+/**
+ * Total heat across open units. Closed units contribute nothing.
+ */
+export function unitsHeat(units: UnitRow[], direction: "long" | "short"): number {
+  return units
+    .filter((u) => u.status === "open")
+    .reduce((sum, u) => sum + unitHeat(u, direction), 0);
+}
 
 /**
  * Everything here is computed on read. Nothing is stored denormalized, so

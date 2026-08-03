@@ -1,5 +1,5 @@
 import { JanusError } from "../../output.js";
-import { tradeSummary } from "../../domain/trade-math.js";
+import { tradeSummary, unitsHeat } from "../../domain/trade-math.js";
 function requireTrade(db, tradeId) {
     const row = db
         .prepare("SELECT t.*, a.symbol FROM trade t JOIN asset a ON a.id = t.asset_id WHERE t.id = ?")
@@ -113,4 +113,17 @@ export function listTrades(db, filters) {
         const units = unitsOf(db, t.id);
         return { ...t, summary: tradeSummary(t.direction, t.initial_risk, units) };
     });
+}
+/**
+ * Total heat across all open trades in the book. A stop at breakeven or better
+ * contributes zero heat, freeing capacity for new positions.
+ */
+export function bookHeat(db) {
+    const rows = db
+        .prepare(`SELECT t.id, t.direction FROM trade t WHERE t.status = 'open'`)
+        .all();
+    return rows.reduce((sum, t) => {
+        const units = unitsOf(db, t.id);
+        return sum + unitsHeat(units, t.direction);
+    }, 0);
 }

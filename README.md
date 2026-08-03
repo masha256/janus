@@ -305,10 +305,16 @@ or blocked.
 | `flipflop_cooldown_days` | flipflopGate | `5` | Days after an exit during which opposite-side re-entry faces extra scrutiny. |
 | `flipflop_opposite_strength_min` | flipflopGate | `0.6` | Minimum `\|strength\|` for opposite-side re-entry during the flipflop cooldown. |
 | `flipflop_opposite_persist_days` | flipflopGate | `3` | Run-days the opposite-side signal must have persisted to override the flipflop cooldown. |
-| `account_capital` | heatGate | `0` | Account capital declared for the book; currently accepted but not enforced. |
-| `max_heat_pct` | heatGate | `100` | Account-level heat ceiling; currently accepted but not enforced. |
-| `per_trade_max_risk_pct` | heatGate | `2` | Per-trade risk ceiling; currently accepted but not enforced. |
-| `per_asset_max_notional` | heatGate | `0` | Per-asset notional ceiling; currently accepted but not enforced. |
+| `account_capital` | heatGate | `100000` | Total investable account capital used for sizing and heat calculations. |
+| `max_heat_pct` | heatGate | `15` | Account-level heat ceiling as a percent of `account_capital`. |
+| `per_trade_max_risk_pct` | heatGate | `5` | Max risk per trade as a percent of `account_capital` before conviction scaling. |
+| `per_asset_max_notional_pct` | heatGate | `20` | Hard per-asset notional cap as a percent of `account_capital`. |
+| `stop_atr_multiple` | sizing | `2` | Initial stop distance = `entry ± N × ATR`. |
+| `trailing_atr_multiple` | sizing | `2` | Trailing stop distance in the runner / late-trend phase. |
+| `breakeven_trigger_r` | sizing | `1` | Unrealized R at which the oldest unit's stop moves to breakeven. |
+| `partial_trigger_r` | sizing | `1.5` | Unrealized R at which a partial exit is recommended. |
+| `partial_exit_fraction` | sizing | `0.5` | Fraction of the newest unit trimmed at the partial target. |
+| `max_time_stop_days` | sizing | `42` | Max calendar days a position can remain open without reaching its target. |
 
 `trendGate` is a three-tier gate. For a long, price must be above the 20-day and
 50-day MAs (`starter` is not used for longs at the moment; pass/fail only). For a
@@ -321,6 +327,52 @@ still allows a `starter` tier but warns that the move is stretched.
 gate blocks but at least one gate returns `starter` or `insufficient_history`.
 Otherwise it is `full`. Entries use `size_tier` to decide how aggressively to size;
 HOLD/EXIT/TRIM directives still carry the gate status for observability.
+
+## Position sizing
+
+Sizing turns a score's `INITIATE` or `ADD` into a concrete, risk-controlled
+position. All sizing parameters resolve through the same
+`cluster_param → global_param → built-in default` chain as the other parameters.
+
+| Parameter | Scope | Default | Description |
+| --- | --- | --- | --- |
+| `account_capital` | sizing | `100000` | Total investable account base. |
+| `max_heat_pct` | sizing | `15` | Max total open risk across the whole book as a percent of `account_capital`. |
+| `per_trade_max_risk_pct` | sizing | `5` | Max risk for one trade as a percent of `account_capital`, before conviction scaling. |
+| `per_asset_max_notional_pct` | sizing | `20` | Hard per-asset notional cap as a percent of `account_capital`. |
+| `stop_atr_multiple` | sizing | `2` | Initial stop distance = `entry ± N × ATR`. |
+| `trailing_atr_multiple` | sizing | `2` | Trailing stop distance in the runner / late-trend phase. |
+| `breakeven_trigger_r` | sizing | `1` | Unrealized R at which the oldest unit's stop moves to breakeven. |
+| `partial_trigger_r` | sizing | `1.5` | Unrealized R at which a partial exit is recommended. |
+| `partial_exit_fraction` | sizing | `0.5` | Fraction of the newest unit trimmed at the partial target. |
+| `max_time_stop_days` | sizing | `42` | Max calendar days a position can remain open without reaching its target. |
+
+Formulas used:
+
+```
+Risk $   = Capital × Max Risk % × (Conviction / 10)
+Size $   = Risk $ / Stop Distance %
+Heat $   = Risk $  (for pre-breakeven units; breakeven or better stops contribute zero)
+```
+
+The final suggested notional is the smaller of the risk-derived size and the
+`per_asset_max_notional_pct` cap. `heatGate` blocks new entries/adds when
+`current_heat + proposed_heat > max_heat_pct` of capital.
+
+### Trade ladder
+
+1. **Entry** — initial stop set; full 1R at risk.
+2. **+1R** — stop moves to breakeven on the oldest unit; heat freed.
+3. **+1.5R** — partial exit on the newest unit opens the add window.
+4. **Runner** — trailing stop at `trailing_atr_multiple × ATR`; never widened.
+5. **Late trend** — same trailing distance, but labeled as a tighten.
+6. **Time stop** — full exit if the position sits beyond `max_time_stop_days` without reaching target.
+7. **Signal decay** — pre-breakeven decays exit immediately; post-breakeven decays require two consecutive run-days of confirmation.
+
+CLI support:
+- `janus trade open <symbol> --size auto --stop auto` uses the score's sizing plan / ATR.
+- `janus trade set-stop <trade> --stop auto` trails the stop at the ATR multiple.
+- `janus trade set-stop` rejects any stop that would widen risk.
 
 ## Parameters
 
@@ -337,8 +389,8 @@ for a cluster. An asset with no cluster resolves against `global_param` and the 
 Defaults (`domain/params.ts` is the authority): `beta_factor 1.0`,
 `screen_threshold 1.0`, `w_catalyst 0.25`, `w_sentiment 0.25`, `w_trend 0.3`,
 `w_regime 0.15`, `w_secular 0.05`, `fear_premium 1.25`, `divergence_boost 0.5`,
-`min_history_bars 200`, `max_units 3`, plus the gate parameters documented in the
-**Scoring gates** section above.
+`min_history_bars 200`, `max_units 3`, plus the gate and sizing parameters
+documented in the **Scoring gates** and **Position sizing** sections above.
 
 The macro read is session-wide, so it resolves against the global rung only; a cluster
 read resolves against its own cluster first, like everything else.
@@ -348,7 +400,7 @@ read resolves against its own cluster first, like everything else.
 All parameters resolve through `cluster_param → global_param → built-in default`.
 Set a global with `janus param set <key> <value>` or a cluster override with
 `janus cluster set-param <key> <param> <value>`. Gate parameters are documented in
-the **Scoring gates** section above.
+the **Scoring gates** section above; sizing parameters in **Position sizing**.
 
 | Parameter | Scope | Default | Description |
 | --- | --- | --- | --- |
@@ -368,7 +420,7 @@ the **Scoring gates** section above.
 | `regime_trigger_short_min` | directive | `-1.5` | Block new shorts and force short exits when `regime_smile` reaches this negative extreme. |
 | `regime_force_exit_threshold` | directive | `1.8` | Force a full `EXIT` when `regime_smile` exceeds this against an open position. |
 | `actionable_catalyst_min` | directive | `1.5` | Minimum `\|catalyst\|` that counts as an actionable new signal for the persistence rule. |
-| `actionable_strength_delta` | directive | `2.5` | Minimum change in `\|strength\|` from the prior score that counts as actionable. |
+| `actionable_strength_delta` | directive | `1.5` | Minimum change in `\|strength\|` from the prior score that counts as actionable. |
 
 Boolean parameters (`require_golden_for_long`, `require_death_for_short`) use
 `1` for true and `0` for false.

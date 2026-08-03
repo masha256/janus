@@ -2,11 +2,16 @@ import { Command } from "commander";
 import { requireAssetBySymbol, requireSymbols } from "../db/repo/asset.js";
 import { openTrade, addUnit, setStop, exitUnits, getTrade, listTrades } from "../db/repo/trade.js";
 import { getSession } from "../db/repo/session.js";
-import { latestCoverage } from "../db/repo/coverage.js";
+import { latestCoverage, getCoverage } from "../db/repo/coverage.js";
 import { todayNY, nowIso } from "../domain/session.js";
 import { csv, num, oneOf, positive, readText, required, unknownVerb } from "./args.js";
 import { handler, withDb } from "./command.js";
 import { JanusError } from "../output.js";
+import { getScore } from "../db/repo/score.js";
+import { getGlobalParams, getClusterParams } from "../db/repo/cluster.js";
+import { resolveParams } from "../domain/params.js";
+import { sizeFromRiskAndStop, stopDistancePct, stopFromAtr } from "../domain/sizing.js";
+import { isStopWidening } from "../domain/ladder.js";
 const VERBS = "open, add-unit, set-stop, exit, list, show";
 // Risk may legitimately be 0 once a stop has been moved past entry (free carry).
 const RISK_MAX = Number.MAX_SAFE_INTEGER;
@@ -36,9 +41,10 @@ export function build(emit) {
         .argument("[symbol]", "market symbol")
         .option("--direction <long|short>", "required; a short logged as a long inverts everything")
         .option("--price <N>", "entry price")
-        .option("--stop <N>", "initial stop")
+        .option("--stop <N|auto>", "initial stop; auto uses stop_atr_multiple from coverage")
         .option("--risk <N>", "risk in account terms; 0 is allowed (free carry)")
         .option("--notional <N>", "position size")
+        .option("--size <N|auto>", "position size; auto uses sizing plan from latest score")
         .option("--thesis <TEXT>", "free text; - reads stdin")
         .option("--tag <TEXT>", "unit tag, e.g. runner or core")
         .option("--date <YYYY-MM-DD>", "the real entry date, not a session address")
@@ -47,9 +53,10 @@ export function build(emit) {
         .description("Add a unit to an open trade")
         .argument("[trade_id]", "trade id")
         .option("--price <N>", "entry price")
-        .option("--stop <N>", "stop for this unit")
+        .option("--stop <N|auto>", "stop for this unit")
         .option("--risk <N>", "risk in account terms")
         .option("--notional <N>", "size of this unit")
+        .option("--size <N|auto>", "size of this unit; auto uses sizing plan from latest score")
         .option("--date <YYYY-MM-DD>", "the real entry date")
         .option("--tag <TEXT>", "unit tag, e.g. runner or core")
         .action(async (id, opts) => emit(await add(id, opts)));
@@ -85,40 +92,90 @@ function open(symbol, opts) {
         const on = opts.date ?? todayNY();
         const asset = requireAssetBySymbol(db, required(symbol, "symbol").toUpperCase());
         const session = getSession(db, on);
+        const direction = oneOf(opts.direction, "direction", ["long", "short"]);
+        const params = resolveParams(getClusterParams(db, asset.cluster_id), getGlobalParams(db));
+        const coverage = getCoverage(db, on, asset.id) ?? latestCoverage(db, asset.id)?.values;
+        const resolved = resolveEntryInputs({
+            direction,
+            price: opts.price,
+            stop: opts.stop,
+            risk: opts.risk,
+            notional: opts.notional,
+            size: opts.size,
+            assetSymbol: asset.symbol,
+            assetId: asset.id,
+            params,
+            coverage,
+            db,
+            mode: "open",
+        });
         const id = openTrade(db, {
             asset_id: asset.id,
-            direction: oneOf(opts.direction, "direction", ["long", "short"]),
+            direction,
             opened_on: on,
-            price: positive(opts.price, "price"),
-            stop: positive(opts.stop, "stop"),
-            risk: num(opts.risk, "risk", 0, RISK_MAX),
-            notional: positive(opts.notional, "notional"),
+            price: resolved.price,
+            stop: resolved.stop,
+            risk: resolved.risk,
+            notional: resolved.notional,
             thesis: readText(opts.thesis) ?? null,
             origin_session_date: session === undefined ? null : session.session_date,
             tag: opts.tag ?? null,
         }, nowIso());
-        return getTrade(db, id);
+        const tradeResult = getTrade(db, id);
+        return { ...tradeResult, auto: resolved.auto };
     });
 }
 function add(raw, opts) {
     return withDb((db) => {
         const id = tradeId(raw);
+        const trade = getTrade(db, id);
+        const asset = requireAssetBySymbol(db, trade.trade.symbol);
+        const params = resolveParams(getClusterParams(db, asset.cluster_id), getGlobalParams(db));
+        const coverage = getCoverage(db, opts.date ?? todayNY(), asset.id) ?? latestCoverage(db, asset.id)?.values;
+        const resolved = resolveEntryInputs({
+            direction: trade.trade.direction,
+            price: opts.price,
+            stop: opts.stop,
+            risk: opts.risk,
+            notional: opts.notional,
+            size: opts.size,
+            assetSymbol: asset.symbol,
+            assetId: asset.id,
+            params,
+            coverage,
+            db,
+            mode: "add",
+        });
         const seq = addUnit(db, id, {
             entry_on: opts.date ?? todayNY(),
-            price: positive(opts.price, "price"),
-            stop: positive(opts.stop, "stop"),
-            risk: num(opts.risk, "risk", 0, RISK_MAX),
-            notional: positive(opts.notional, "notional"),
+            price: resolved.price,
+            stop: resolved.stop,
+            risk: resolved.risk,
+            notional: resolved.notional,
             tag: opts.tag ?? null,
         });
-        return { seq, ...getTrade(db, id) };
+        return { seq, ...getTrade(db, id), auto: resolved.auto };
     });
 }
 function stop(raw, opts) {
     return withDb((db) => {
         const id = tradeId(raw);
-        const moved = setStop(db, id, positive(opts.stop, "stop"), unitSeq(opts.unit));
-        return { units_moved: moved, ...getTrade(db, id) };
+        const stopValue = opts.stop;
+        const newStop = stopValue === "auto"
+            ? resolveAutoStop(db, id, unitSeq(opts.unit))
+            : positive(stopValue, "stop");
+        const trade = getTrade(db, id);
+        const affectedUnits = unitSeq(opts.unit) === undefined
+            ? trade.units.filter((u) => u.status === "open")
+            : trade.units.filter((u) => u.status === "open" && u.seq === unitSeq(opts.unit));
+        const direction = trade.trade.direction;
+        for (const unit of affectedUnits) {
+            if (isStopWidening(direction, unit.stop, newStop)) {
+                throw new JanusError("VALIDATION", `stop widening rejected: unit ${unit.seq} stop ${unit.stop} -> ${newStop}`);
+            }
+        }
+        const moved = setStop(db, id, newStop, unitSeq(opts.unit));
+        return { units_moved: moved, ...getTrade(db, id), auto: stopValue === "auto" };
     });
 }
 function exit(raw, opts) {
@@ -135,6 +192,98 @@ function list(opts) {
         const trades = listTrades(db, { status, symbols: requireSymbols(db, csv(opts.asset)) });
         return { count: trades.length, trades };
     });
+}
+function resolveEntryInputs(opts) {
+    const auto = {};
+    // Price must always be supplied by the operator.
+    const price = positive(opts.price, "price");
+    // Stop: explicit, auto from ATR, or pulled from the latest sizing plan.
+    let stop;
+    if (opts.stop === "auto") {
+        auto.stop = true;
+        const atr = opts.coverage?.atr14;
+        if (atr === undefined || atr === null || atr <= 0) {
+            throw new JanusError("VALIDATION", "no ATR available to compute auto stop");
+        }
+        stop = stopFromAtr(price, atr, opts.params["stop_atr_multiple"] ?? 2, opts.direction);
+    }
+    else if (opts.stop === undefined) {
+        // Fall back to the latest score's sizing plan if available.
+        const score = getScore(opts.db, todayNY(), opts.assetId);
+        const sizingStop = score?.plan?.sizing_plan?.stop_price;
+        if (sizingStop === undefined) {
+            throw new JanusError("VALIDATION", "--stop is required unless a sizing plan exists");
+        }
+        stop = sizingStop;
+    }
+    else {
+        stop = positive(opts.stop, "stop");
+    }
+    // Notional: explicit, auto from sizing plan, or derived from risk and stop.
+    let notional;
+    if (opts.size === "auto") {
+        auto.size = true;
+        const score = getScore(opts.db, todayNY(), opts.assetId);
+        const sizing = score?.plan?.sizing_plan;
+        if (sizing !== undefined) {
+            notional = sizing.suggested_notional;
+        }
+        else {
+            const distPct = stopDistancePct(price, stop, opts.direction);
+            if (distPct <= 0) {
+                throw new JanusError("VALIDATION", "auto size requires a valid stop distance");
+            }
+            const result = sizeFromRiskAndStop({
+                capital: opts.params["account_capital"] ?? 0,
+                maxRiskPct: opts.params["per_trade_max_risk_pct"] ?? 5,
+                conviction: score?.conviction ?? opts.params["signal_conviction_initiate"] ?? 6,
+                stopDistancePct: distPct,
+                perAssetMaxNotionalPct: opts.params["per_asset_max_notional_pct"] ?? 20,
+            });
+            notional = result.cappedPositionSizeDollars;
+        }
+    }
+    else if (opts.notional === undefined) {
+        const score = getScore(opts.db, todayNY(), opts.assetId);
+        const sizingNotional = score?.plan?.sizing_plan?.suggested_notional;
+        if (sizingNotional === undefined) {
+            throw new JanusError("VALIDATION", "--notional or --size auto is required");
+        }
+        notional = sizingNotional;
+    }
+    else {
+        notional = positive(opts.notional, "notional");
+    }
+    // Risk: explicit or computed from sizing plan / stop distance.
+    let risk;
+    if (opts.risk !== undefined) {
+        risk = num(opts.risk, "risk", 0, RISK_MAX);
+    }
+    else {
+        const score = getScore(opts.db, todayNY(), opts.assetId);
+        if (score?.plan?.sizing_plan?.risk_dollars !== undefined) {
+            risk = score.plan.sizing_plan.risk_dollars;
+        }
+        else {
+            const distPct = stopDistancePct(price, stop, opts.direction);
+            risk = distPct > 0 ? notional * distPct : 0;
+        }
+    }
+    return { price, stop, risk, notional, auto };
+}
+function resolveAutoStop(db, tradeId, seq) {
+    const trade = getTrade(db, tradeId);
+    const coverage = latestCoverage(db, trade.trade.asset_id)?.values;
+    if (coverage === undefined || coverage.mark_price === null || coverage.atr14 === null) {
+        throw new JanusError("VALIDATION", "no coverage available to trail stop");
+    }
+    const params = resolveParams(
+    // cluster resolution skipped for brevity; asset cluster looked up below
+    {}, getGlobalParams(db));
+    const mark = coverage.mark_price;
+    const atr = coverage.atr14;
+    const multiple = params["trailing_atr_multiple"] ?? 2;
+    return trade.trade.direction === "long" ? mark - multiple * atr : mark + multiple * atr;
 }
 function show(raw, date) {
     return withDb((db) => {

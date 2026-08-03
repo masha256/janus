@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { tradeSummary } from "./trade-math.js";
+import { tradeSummary, unitHeat, unitsHeat } from "./trade-math.js";
 const unit = (over = {}) => ({
     seq: 1, entry_price: 100, notional: 1000, risk: 100, stop: 90,
     status: "open", exit_price: null, funding: 0, tag: null, ...over,
@@ -59,4 +59,25 @@ test("an empty unit list is neutral, not a divide by zero", () => {
         avg_entry: null, open_risk: 0, realized_pnl: 0, total_funding: 0,
         net_pnl: 0, r_multiple: null, net_r_multiple: null,
     });
+});
+test("unitHeat floors at zero for breakeven or better stops", () => {
+    const atRisk = unitHeat(unit({ entry_price: 100, stop: 90 }), "long");
+    assert.equal(atRisk, 100); // size 10 x 10
+    const breakeven = unitHeat(unit({ entry_price: 100, stop: 100 }), "long");
+    assert.equal(breakeven, 0);
+    const locked = unitHeat(unit({ entry_price: 100, stop: 110 }), "long");
+    assert.equal(locked, 0);
+});
+test("unitHeat works for shorts", () => {
+    assert.equal(unitHeat(unit({ entry_price: 100, stop: 110 }), "short"), 100);
+    assert.equal(unitHeat(unit({ entry_price: 100, stop: 100 }), "short"), 0);
+    assert.equal(unitHeat(unit({ entry_price: 100, stop: 90 }), "short"), 0);
+});
+test("unitsHeat sums only open units", () => {
+    const heat = unitsHeat([
+        unit({ seq: 1, entry_price: 100, stop: 90, status: "open" }),
+        unit({ seq: 2, entry_price: 100, stop: 90, status: "open" }),
+        unit({ seq: 3, entry_price: 100, stop: 90, status: "closed" }),
+    ], "long");
+    assert.equal(heat, 200); // two open units at 100 each
 });

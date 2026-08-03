@@ -59,10 +59,22 @@ export type ScorePlan = {
 
   /** Recommended stop/exit management for open units. */
   stop_plan?: {
-    action: "move_to_breakeven" | "trail" | "tighten" | "hold";
+    action: "move_to_breakeven" | "trail" | "tighten" | "time_exit" | "decay_exit" | "hold";
     /** Which units the action targets. */
-    affected_units: "all" | "oldest" | "newest" | string;
+    affected_units: "all" | "oldest" | "newest" | "partial_target" | string;
+    /** Optional computed stop price, e.g. from ATR trailing. */
+    new_stop?: number;
     rationale: string;
+  };
+
+  /** Sizing plan for new or adding positions. */
+  sizing_plan?: {
+    suggested_notional: number;
+    risk_dollars: number;
+    stop_distance_pct: number;
+    stop_price: number;
+    heat_after_trade: number;
+    per_asset_cap_dollars: number;
   };
 
   /** Recommended unit reduction if the ladder calls for TRIM. */
@@ -95,6 +107,11 @@ export function formatPlan(plan: ScorePlan): string {
   if (plan.trim_plan) {
     parts.push(`trim_to=${plan.trim_plan.target_units}:${plan.trim_plan.which}`);
   }
+  if (plan.sizing_plan) {
+    parts.push(
+      `size=$${Math.round(plan.sizing_plan.suggested_notional)} risk=$${Math.round(plan.sizing_plan.risk_dollars)}`,
+    );
+  }
   return parts.join(" | ");
 }
 
@@ -122,6 +139,15 @@ export function planResults(plan: ScorePlan): Record<string, number | string> {
     r["stop_action"] = plan.stop_plan.action;
     r["stop_affected_units"] = plan.stop_plan.affected_units;
     r["stop_rationale"] = plan.stop_plan.rationale;
+    if (plan.stop_plan.new_stop !== undefined) r["stop_new_stop"] = plan.stop_plan.new_stop;
+  }
+  if (plan.sizing_plan) {
+    r["sizing_suggested_notional"] = plan.sizing_plan.suggested_notional;
+    r["sizing_risk_dollars"] = plan.sizing_plan.risk_dollars;
+    r["sizing_stop_distance_pct"] = plan.sizing_plan.stop_distance_pct;
+    r["sizing_stop_price"] = plan.sizing_plan.stop_price;
+    r["sizing_heat_after_trade"] = plan.sizing_plan.heat_after_trade;
+    r["sizing_per_asset_cap_dollars"] = plan.sizing_plan.per_asset_cap_dollars;
   }
   if (plan.trim_plan) {
     r["trim_target_units"] = plan.trim_plan.target_units;
@@ -161,6 +187,7 @@ export function scorePlanFromResults(results: Record<string, unknown>): ScorePla
       action: stopAction,
       affected_units: String(results["stop_affected_units"] ?? "all") as NonNullable<ScorePlan["stop_plan"]>["affected_units"],
       rationale: String(results["stop_rationale"] ?? ""),
+      new_stop: results["stop_new_stop"] === undefined ? undefined : Number(results["stop_new_stop"]),
     };
   }
   const trimTarget = results["trim_target_units"] as number | undefined;

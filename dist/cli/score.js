@@ -10,6 +10,7 @@ import { resolveParams } from "../domain/params.js";
 import { deriveScore } from "../domain/score.js";
 import { formatPosition, planResults } from "../domain/directive.js";
 import { assertPhaseOrder, nowIso } from "../domain/session.js";
+import { bookHeat } from "../db/repo/trade.js";
 import { pairs, readText, required, unknownVerb } from "./args.js";
 import { collect, handler, withDb } from "./command.js";
 import { JanusError } from "../output.js";
@@ -101,6 +102,7 @@ function record(symbol, opts) {
             last_exit: lastTradeExit(db, asset.id, session.session_date),
             binary: screen === null ? null : { date: screen.binary_date, reason: screen.binary_reason },
             account_capital: params["account_capital"] ?? 0,
+            current_heat: bookHeat(db),
             previous_score: previous,
         };
         const { strength, conviction, directive, plan, results } = deriveScore(factors, context, params);

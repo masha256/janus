@@ -250,7 +250,8 @@ test("persistence rule allows EXIT when divergence is actionable", () => {
         },
         results: {},
     };
-    const got = deriveScore(m(-1, -2, -2, 50, false, true), ctxWithPosition(longPos(2), coverage(), prev), DEFAULT_PARAMS);
+    const params = { ...DEFAULT_PARAMS, actionable_strength_delta: 0.5 };
+    const got = deriveScore(m(-1, -2, -2, 50, false, true), ctxWithPosition(longPos(2), coverage(), prev), params);
     assert.equal(got.directive, "EXIT");
     assert.equal(got.plan.persistence_rule, "fresh_signal");
 });

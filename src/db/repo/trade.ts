@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { JanusError } from "../../output.ts";
-import { tradeSummary } from "../../domain/trade-math.ts";
+import { tradeSummary, unitsHeat } from "../../domain/trade-math.ts";
 import type { UnitRow } from "../../domain/trade-math.ts";
 
 export type OpenTradeInput = {
@@ -182,4 +182,20 @@ export function listTrades(
     const units = unitsOf(db, t.id);
     return { ...t, summary: tradeSummary(t.direction, t.initial_risk, units) };
   });
+}
+
+/**
+ * Total heat across all open trades in the book. A stop at breakeven or better
+ * contributes zero heat, freeing capacity for new positions.
+ */
+export function bookHeat(db: DatabaseSync): number {
+  const rows = db
+    .prepare(
+      `SELECT t.id, t.direction FROM trade t WHERE t.status = 'open'`,
+    )
+    .all() as { id: number; direction: "long" | "short" }[];
+  return rows.reduce((sum, t) => {
+    const units = unitsOf(db, t.id);
+    return sum + unitsHeat(units, t.direction);
+  }, 0);
 }

@@ -1,4 +1,5 @@
 import { num } from "./metrics.js";
+import { unitsHeat } from "./trade-math.js";
 const boolParam = (params, key) => (params[key] ?? 0) !== 0;
 export function signalGate(strength, conviction, position, params) {
     const absStrength = Math.abs(strength);
@@ -99,11 +100,13 @@ export function binaryGate(sessionDate, binary, params) {
     const days = daysBetween(binary.date, sessionDate);
     return days !== null && days >= 0 && days < cooldown ? "blocked" : "pass";
 }
-export function heatGate(params) {
-    // Stubbed until sizing is built. The param account_capital is accepted so
-    // clusters can declare capital, but no blocking logic runs yet.
-    void params["account_capital"];
-    return "pass";
+export function heatGate(params, currentHeat, proposedHeat) {
+    const capital = params["account_capital"] ?? 0;
+    const maxHeatPct = params["max_heat_pct"] ?? 100;
+    if (capital <= 0)
+        return "pass"; // no capital declared: warn but do not block
+    const maxHeatDollars = capital * (maxHeatPct / 100);
+    return currentHeat + proposedHeat > maxHeatDollars ? "blocked" : "pass";
 }
 export function flipflopGate(side, sessionDate, lastExit, persistence, params) {
     if (side === null || lastExit === null)
@@ -155,7 +158,7 @@ export function runGates(strength, conviction, position, metrics, ctx) {
     const persistence = persistenceGate(strength, conviction, side, ctx.recentScores, ctx.params);
     const trend = trendGate(side, ctx.coverage, crowding, ctx.params);
     const binary = binaryGate(ctx.sessionDate, ctx.binary, ctx.params);
-    const heat = heatGate(ctx.params);
+    const heat = heatGate(ctx.params, ctx.currentHeat, ctx.proposedHeat);
     const flipflop = flipflopGate(side, ctx.sessionDate, ctx.lastExit, persistence, ctx.params);
     return { signal, persistence, trend, binary, heat, flipflop };
 }

@@ -47,11 +47,25 @@ export const DEFAULT_PARAMS = {
     flipflop_cooldown_days: 5,
     flipflop_opposite_strength_min: 0.6,
     flipflop_opposite_persist_days: 3,
-    // heatGate — account-level risk heat (stubbed until sizing is built).
-    account_capital: 0,
-    max_heat_pct: 100,
-    per_trade_max_risk_pct: 2,
-    per_asset_max_notional: 0,
+    // heatGate — account-level risk heat and per-position sizing caps.
+    account_capital: 100000,
+    max_heat_pct: 15,
+    per_trade_max_risk_pct: 5,
+    per_asset_max_notional_pct: 20,
+    // stop-ladder defaults.
+    stop_atr_multiple: 2,
+    breakeven_trigger_r: 1,
+    partial_trigger_r: 1.5,
+    partial_exit_fraction: 0.5,
+    trailing_atr_multiple: 2,
+    max_time_stop_days: 42,
+    // directive ladder — regime triggers and persistence actionability.
+    conv_hold: 4,
+    regime_trigger_long_max: 1.5,
+    regime_trigger_short_min: -1.5,
+    regime_force_exit_threshold: 1.8,
+    actionable_catalyst_min: 1.5,
+    actionable_strength_delta: 1.5,
 };
 export function resolveParams(cluster, global) {
     return { ...DEFAULT_PARAMS, ...global, ...cluster };
