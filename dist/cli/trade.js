@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { requireAssetBySymbol, requireSymbols } from "../db/repo/asset.js";
 import { openTrade, addUnit, setStop, exitUnits, getTrade, listTrades } from "../db/repo/trade.js";
 import { getSession } from "../db/repo/session.js";
+import { latestCoverage } from "../db/repo/coverage.js";
 import { todayNY, nowIso } from "../domain/session.js";
 import { csv, num, oneOf, positive, readText, required, unknownVerb } from "./args.js";
 import { handler, withDb } from "./command.js";
@@ -73,9 +74,10 @@ export function build(emit) {
         .option("--asset <SYM[,SYM...]>", "restrict to these symbols")
         .action(async (opts) => emit(await list(opts)));
     cmd.command("show")
-        .description("One trade with its units and summary")
+        .description("One trade with its units, summary, and current coverage progress")
         .argument("[trade_id]", "trade id")
-        .action(async (id) => emit(await withDb((db) => getTrade(db, tradeId(id)))));
+        .option("--date <YYYY-MM-DD>", "coverage reference date; defaults to today, New York")
+        .action(async (id, opts) => emit(await show(id, opts.date)));
     return cmd;
 }
 function open(symbol, opts) {
@@ -132,6 +134,65 @@ function list(opts) {
         const status = opts.open === true ? "open" : opts.closed === true ? "closed" : undefined;
         const trades = listTrades(db, { status, symbols: requireSymbols(db, csv(opts.asset)) });
         return { count: trades.length, trades };
+    });
+}
+function show(raw, date) {
+    return withDb((db) => {
+        const id = tradeId(raw);
+        const base = getTrade(db, id);
+        const latest = latestCoverage(db, base.trade.asset_id);
+        const today = date ?? todayNY();
+        const stale = latest === null || latest.session_date < today;
+        const warnings = [];
+        if (latest === null) {
+            warnings.push("no coverage data found for this asset; run coverage first");
+        }
+        else if (stale) {
+            warnings.push(`coverage is stale: latest ${latest.session_date}, today ${today}`);
+        }
+        const markPrice = latest?.values.mark_price ?? null;
+        const sign = base.trade.direction === "long" ? 1 : -1;
+        const enrichedUnits = base.units.map((u) => {
+            if (u.status !== "open" || markPrice === null)
+                return u;
+            const size = u.notional / u.entry_price;
+            const unrealizedPnl = size * (markPrice - u.entry_price) * sign;
+            const rMultiple = base.trade.initial_risk === 0 ? null : unrealizedPnl / base.trade.initial_risk;
+            const distanceToStop = u.stop === 0 ? null : (markPrice - u.stop) * sign;
+            return {
+                ...u,
+                mark_price: markPrice,
+                unrealized_pnl: unrealizedPnl,
+                unrealized_r: rMultiple,
+                distance_to_stop: distanceToStop,
+            };
+        });
+        const openUnits = base.units.filter((u) => u.status === "open");
+        const tradeUnrealized = markPrice === null || openUnits.length === 0
+            ? null
+            : openUnits.reduce((a, u) => {
+                const size = u.notional / u.entry_price;
+                return a + size * (markPrice - u.entry_price) * sign;
+            }, 0);
+        const tradeUnrealizedR = tradeUnrealized === null || base.trade.initial_risk === 0
+            ? null
+            : tradeUnrealized / base.trade.initial_risk;
+        return {
+            ...base,
+            units: enrichedUnits,
+            coverage: latest === null ? null : {
+                session_date: latest.session_date,
+                mark_price: latest.values.mark_price,
+                px_vs_sma50: latest.values.px_vs_sma50,
+                cross_50_200: latest.values.cross_50_200,
+                fetched_at: latest.values.fetched_at,
+            },
+            progress: tradeUnrealized === null ? null : {
+                unrealized_pnl: tradeUnrealized,
+                unrealized_r: tradeUnrealizedR,
+            },
+            warnings: warnings.length > 0 ? warnings : undefined,
+        };
     });
 }
 export const handle = handler(build);

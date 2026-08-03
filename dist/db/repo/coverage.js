@@ -44,3 +44,14 @@ export function listCoverage(db, date, symbols) {
        ORDER BY a.symbol`)
         .all(date, ...(symbols ?? []));
 }
+/** The most recent coverage row for an asset, regardless of session date. */
+export function latestCoverage(db, assetId) {
+    const row = db
+        .prepare(`SELECT session_date, ${COLUMNS.join(", ")} FROM coverage
+       WHERE asset_id = ? ORDER BY session_date DESC LIMIT 1`)
+        .get(assetId);
+    if (row === undefined)
+        return null;
+    const { session_date, ...values } = row;
+    return { session_date, values };
+}

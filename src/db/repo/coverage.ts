@@ -61,3 +61,19 @@ export function listCoverage(db: DatabaseSync, date: string, symbols?: string[])
     )
     .all(date, ...(symbols ?? []));
 }
+
+/** The most recent coverage row for an asset, regardless of session date. */
+export function latestCoverage(
+  db: DatabaseSync,
+  assetId: number,
+): { session_date: string; values: CoverageValues } | null {
+  const row = db
+    .prepare(
+      `SELECT session_date, ${COLUMNS.join(", ")} FROM coverage
+       WHERE asset_id = ? ORDER BY session_date DESC LIMIT 1`,
+    )
+    .get(assetId) as ({ session_date: string } & CoverageValues) | undefined;
+  if (row === undefined) return null;
+  const { session_date, ...values } = row;
+  return { session_date, values };
+}
