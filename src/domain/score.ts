@@ -3,6 +3,7 @@ import { type Metrics, num, requireNum } from "./metrics.ts";
 import type { Read } from "./read.ts";
 import type { Directive, OpenPosition, PositionState, ScorePlan } from "./directive.ts";
 import type { CoverageValues } from "./coverage.ts";
+import { actionableNewSignal, regimeTriggerState, runGates } from "./gates.ts";
 
 const clamp = (x: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, x));
 const boolParam = (params: Record<string, number>, key: string): boolean =>
@@ -42,6 +43,16 @@ export type ScoreContext = {
     cluster_id: number | null;
     coverage: CoverageValues | null;
   };
+  /** The session date as an ISO date string, used by date-aware gates. */
+  session_date: string;
+  /** The N most recent scores for this asset, newest first, for persistence and flipflop gates. */
+  recent_scores?: ScoreResult[];
+  /** The most recent closed trade exit for this asset, if any. */
+  last_exit?: { session_date: string; side: "long" | "short"; units: number } | null;
+  /** Screen-level binary event metadata, if any. */
+  binary?: { date: string | null; reason: string | null } | null;
+  /** Account capital provided by the operator; heatGate is a stub until sizing is built. */
+  account_capital?: number;
   previous_score?: ScoreResult | null;
 };
 
@@ -169,12 +180,8 @@ export function deriveScore(
     direction,
     conviction,
     ownPosition,
-    context.asset.coverage,
-    regimeSmile,
+    context,
     catalyst,
-    divergence,
-    capitulation,
-    context.previous_score ?? null,
     params,
   );
 
@@ -280,35 +287,45 @@ function sentimentFromCrowding(
  *
  * Design principles it implements:
  * - Most days = HOLD, but HOLD means "thesis intact."
- * - Trend/MA structure is a hard gate for entry and scaling.
+ * - Six gates (signal, persistence, trend, binary, heat, flipflop) decide whether
+ *   and how large a new position can be; the ladder turns those gates into the
+ *   final directive and a size_tier.
  * - Regime is context plus an extreme-contrarian trigger.
  * - Direction != conviction: low conviction downgrades aggression to HOLD/TRIM.
- * - Persistence rule resists flip-flopping unless there is an actionable new signal.
+ * - Persistence/flipflop gates resist flip-flopping unless there is an
+ *   actionable new signal.
  */
 function derivePlan(
   strength: number,
   conviction: number,
   position: PositionState,
-  coverage: CoverageValues | null,
-  regimeSmile: number,
+  context: ScoreContext,
   catalyst: number,
-  divergence: boolean,
-  capitulation: boolean,
-  previousScore: ScoreResult | null,
   params: Record<string, number>,
 ): ScorePlan {
-  const strengthInitiate = params["strength_initiate"] ?? 1.0;
-  const convInitiate = params["conv_initiate"] ?? 6;
-  const strengthAdd = params["strength_add"] ?? 1.0;
-  const convAdd = params["conv_add"] ?? 7;
-  const convHold = params["conv_hold"] ?? 4;
-  const strengthExit = params["strength_exit"] ?? 1.0;
-  const maxUnits = params["max_units"] ?? 3;
-
   const side: "long" | "short" | null = strength > 0 ? "long" : strength < 0 ? "short" : null;
   const absStrength = Math.abs(strength);
-  const isWorking = position.side !== null &&
-    ((position.side === "long" && strength > 0) || (position.side === "short" && strength < 0));
+  const regimeSmile = requireNum(context.screen!.results, "regime_smile", -2, 2);
+
+  // Evaluate every gate so the plan can report why it was allowed or blocked.
+  const { signal, persistence, trend, binary, heat, flipflop } = runGates(
+    strength,
+    conviction,
+    position,
+    context.screen!.metrics,
+    {
+      params,
+      sessionDate: context.session_date,
+      coverage: context.asset.coverage,
+      binary: context.binary ?? null,
+      lastExit: context.last_exit ?? null,
+      recentScores: context.recent_scores ?? [],
+    },
+  );
+
+  const blocked = signal === "fail" || persistence === "fail" || trend === "fail" || binary === "blocked" || heat === "blocked" || flipflop === "blocked";
+  const starter = !blocked && (trend === "starter" || persistence === "insufficient_history");
+  const sizeTier: ScorePlan["size_tier"] = blocked ? "blocked" : starter ? "starter" : "full";
 
   // Regime extreme-contrarian trigger.
   const regimeTrigger = regimeTriggerState(regimeSmile, params);
@@ -320,8 +337,11 @@ function derivePlan(
     return (s === "long" && regimeSmile >= threshold) || (s === "short" && regimeSmile <= -threshold);
   };
 
-  // Trend gate: hard condition for entry/add in a direction.
-  const trendOk = side === null ? false : trendGateOK(side, coverage, params);
+  const convHold = params["conv_hold"] ?? 4;
+  const maxUnits = params["max_units"] ?? 3;
+
+  const isWorking = position.side !== null &&
+    ((position.side === "long" && strength > 0) || (position.side === "short" && strength < 0));
 
   let plan: ScorePlan;
 
@@ -331,32 +351,59 @@ function derivePlan(
       plan = {
         directive: "STAND_ASIDE",
         reason: "no directional edge",
-        trend_gate: "fail",
+        size_tier: "blocked",
+        signal_gate: signal,
+        persistence_gate: persistence,
+        trend_gate: trend,
+        binary_gate: binary,
+        heat_gate: heat,
+        flipflop_gate: flipflop,
       };
     } else if (regimeBlocksSide(side)) {
       plan = {
         directive: "STAND_ASIDE",
         reason: `extreme ${side === "long" ? "bull" : "bear"} regime blocks ${side} entry`,
-        trend_gate: trendOk ? "pass" : "fail",
+        size_tier: "blocked",
+        signal_gate: signal,
+        persistence_gate: persistence,
+        trend_gate: trend,
+        binary_gate: binary,
+        heat_gate: heat,
+        flipflop_gate: flipflop,
         regime_trigger: regimeTrigger,
       };
-    } else if (absStrength < strengthInitiate || conviction < convInitiate) {
+    } else if (sizeTier === "blocked") {
+      const gateReasons: string[] = [];
+      if (signal === "fail") gateReasons.push("signal");
+      if (persistence === "fail") gateReasons.push("persistence");
+      if (trend === "fail") gateReasons.push("trend");
+      if (binary === "blocked") gateReasons.push("binary");
+      if (heat === "blocked") gateReasons.push("heat");
+      if (flipflop === "blocked") gateReasons.push("flipflop");
       plan = {
         directive: "STAND_ASIDE",
-        reason: `strength ${strength.toFixed(2)}/conviction ${conviction} below initiate thresholds`,
-        trend_gate: trendOk ? "pass" : "fail",
-      };
-    } else if (!trendOk) {
-      plan = {
-        directive: "STAND_ASIDE",
-        reason: `trend gate fails for ${side} entry`,
-        trend_gate: "fail",
+        reason: gateReasons.length > 0
+          ? `${side} entry blocked by ${gateReasons.join(", ")} gate(s)`
+          : `${side} entry blocked`,
+        size_tier: "blocked",
+        signal_gate: signal,
+        persistence_gate: persistence,
+        trend_gate: trend,
+        binary_gate: binary,
+        heat_gate: heat,
+        flipflop_gate: flipflop,
       };
     } else {
       plan = {
         directive: "INITIATE",
-        reason: `strength ${strength.toFixed(2)} conviction ${conviction} + trend gate pass`,
-        trend_gate: "pass",
+        reason: `strength ${strength.toFixed(2)} conviction ${conviction} + gates pass${sizeTier === "starter" ? " (starter tier)" : ""}`,
+        size_tier: sizeTier,
+        signal_gate: signal,
+        persistence_gate: persistence,
+        trend_gate: trend,
+        binary_gate: binary,
+        heat_gate: heat,
+        flipflop_gate: flipflop,
         entry_plan: { side, max_units: maxUnits },
         stop_plan: { action: "hold", affected_units: "all", rationale: "initial stop set at entry" },
       };
@@ -368,12 +415,19 @@ function derivePlan(
     const aligned = side === posSide;
     const misaligned = side !== null && !aligned;
     const disagreement = misaligned ? absStrength : 0;
+    const strengthExit = params["signal_strength_exit"] ?? 1.0;
 
     if (regimeForcesExit(posSide)) {
       plan = {
         directive: "EXIT",
         reason: `extreme regime against ${posSide} position forces full exit`,
-        trend_gate: trendOk ? "pass" : "fail",
+        size_tier: "full",
+        signal_gate: signal,
+        persistence_gate: persistence,
+        trend_gate: trend,
+        binary_gate: binary,
+        heat_gate: heat,
+        flipflop_gate: flipflop,
         regime_trigger: regimeTrigger,
         stop_plan: { action: "hold", affected_units: "all", rationale: "exit entire position" },
       };
@@ -381,7 +435,13 @@ function derivePlan(
       plan = {
         directive: "EXIT",
         reason: `score flipped against ${posSide} by ${disagreement.toFixed(2)} with conviction ${conviction}`,
-        trend_gate: trendOk ? "pass" : "fail",
+        size_tier: "full",
+        signal_gate: signal,
+        persistence_gate: persistence,
+        trend_gate: trend,
+        binary_gate: binary,
+        heat_gate: heat,
+        flipflop_gate: flipflop,
         stop_plan: { action: "hold", affected_units: "all", rationale: "exit entire position" },
       };
     } else if (conviction < convHold) {
@@ -390,19 +450,29 @@ function derivePlan(
       plan = {
         directive: posUnits > 1 ? "TRIM" : "HOLD",
         reason: `conviction ${conviction} below hold floor ${convHold}; thesis unclear`,
-        trend_gate: trendOk ? "pass" : "fail",
-        persistence_rule: undefined,
+        size_tier: posUnits > 1 ? "full" : "blocked",
+        signal_gate: signal,
+        persistence_gate: persistence,
+        trend_gate: trend,
+        binary_gate: binary,
+        heat_gate: heat,
+        flipflop_gate: flipflop,
         stop_plan: { action: "tighten", affected_units: "newest", rationale: "lower conviction, protect downside" },
         trim_plan: posUnits > 1
           ? { target_units: targetUnits, which: "newest" }
           : undefined,
       };
-    } else if (aligned && absStrength >= strengthAdd && conviction >= convAdd && trendOk && posUnits < maxUnits && isWorking) {
+    } else if (aligned && sizeTier !== "blocked" && posUnits < maxUnits && isWorking) {
       plan = {
         directive: "ADD",
-        reason: `position working, strength ${strength.toFixed(2)} conviction ${conviction} allow add`,
-        trend_gate: "pass",
-        persistence_rule: undefined,
+        reason: `position working, strength ${strength.toFixed(2)} conviction ${conviction} allow add${sizeTier === "starter" ? " (starter tier)" : ""}`,
+        size_tier: sizeTier,
+        signal_gate: signal,
+        persistence_gate: persistence,
+        trend_gate: trend,
+        binary_gate: binary,
+        heat_gate: heat,
+        flipflop_gate: flipflop,
         stop_plan: { action: "move_to_breakeven", affected_units: "oldest", rationale: "new unit adds risk; lock earlier unit" },
       };
     } else {
@@ -411,18 +481,28 @@ function derivePlan(
         reason: aligned
           ? "thesis intact"
           : `mild disagreement ${strength.toFixed(2)} but conviction ${conviction} keeps thesis on review`,
-        trend_gate: trendOk ? "pass" : "fail",
+        size_tier: sizeTier,
+        signal_gate: signal,
+        persistence_gate: persistence,
+        trend_gate: trend,
+        binary_gate: binary,
+        heat_gate: heat,
+        flipflop_gate: flipflop,
         stop_plan: { action: "hold", affected_units: "all", rationale: "review stop/exit plan, no change today" },
       };
     }
   }
 
   // Persistence rule: resist flip-flopping.
+  // Per-asset max notional stub: accepted as a param but not enforced until sizing is built.
+  void params["per_asset_max_notional"];
+
+  const previousScore = context.previous_score ?? null;
   if (previousScore !== null) {
     const prev = previousScore.directive;
     const curr = plan.directive;
     if ((prev === "HOLD" || prev === "ADD") && (curr === "EXIT" || curr === "TRIM")) {
-      if (!actionableNewSignal(strength, catalyst, divergence, capitulation, previousScore, params)) {
+      if (!actionableNewSignal(strength, catalyst, context, previousScore, params)) {
         // Downgrade EXIT to TRIM and TRIM to HOLD unless already at 1 unit.
         if (curr === "EXIT" && position.side !== null && position.units > 1) {
           plan = {
@@ -446,7 +526,7 @@ function derivePlan(
         plan = { ...plan, persistence_rule: "fresh_signal" };
       }
     } else if (prev === "STAND_ASIDE" && curr === "INITIATE") {
-      if (!trendOk || !actionableNewSignal(strength, catalyst, divergence, capitulation, previousScore, params)) {
+      if (sizeTier === "blocked" || !actionableNewSignal(strength, catalyst, context, previousScore, params)) {
         plan = {
           ...plan,
           directive: "STAND_ASIDE",
@@ -463,61 +543,4 @@ function derivePlan(
   return plan;
 }
 
-function trendGateOK(
-  side: "long" | "short",
-  coverage: CoverageValues | null,
-  params: Record<string, number>,
-): boolean {
-  if (coverage === null) return false;
-  const pxVs50 = coverage.px_vs_sma50;
-  const cross50_200 = coverage.cross_50_200;
-  const crossPx50 = coverage.cross_px_50;
 
-  const longCushion = params["trend_gate_long"] ?? 1.0;
-  const shortCushion = params["trend_gate_short"] ?? -1.0;
-  const requireGolden = boolParam(params, "require_golden_for_long");
-  const requireDeath = boolParam(params, "require_death_for_short");
-
-  if (side === "long") {
-    if (crossPx50 !== "above") return false;
-    if (requireGolden && cross50_200 === "death") return false;
-    if (pxVs50 === null || pxVs50 < longCushion) return false;
-    return true;
-  }
-
-  if (side === "short") {
-    if (crossPx50 !== "below") return false;
-    if (requireDeath && cross50_200 === "golden") return false;
-    if (pxVs50 === null || pxVs50 > shortCushion) return false;
-    return true;
-  }
-
-  return false;
-}
-
-function regimeTriggerState(
-  regimeSmile: number,
-  params: Record<string, number>,
-): ScorePlan["regime_trigger"] {
-  const longMax = params["regime_trigger_long_max"] ?? 1.5;
-  const shortMin = params["regime_trigger_short_min"] ?? -1.5;
-  if (regimeSmile >= longMax) return "extreme_bull";
-  if (regimeSmile <= shortMin) return "extreme_bear";
-  return "none";
-}
-
-function actionableNewSignal(
-  strength: number,
-  catalyst: number,
-  divergence: boolean,
-  capitulation: boolean,
-  previousScore: ScoreResult,
-  params: Record<string, number>,
-): boolean {
-  const catalystMin = params["actionable_catalyst_min"] ?? 1.5;
-  const strengthDelta = params["actionable_strength_delta"] ?? 1.0;
-  if (capitulation || divergence) return true;
-  if (Math.abs(catalyst) >= catalystMin) return true;
-  if (Math.abs(strength - previousScore.strength) >= strengthDelta) return true;
-  return false;
-}

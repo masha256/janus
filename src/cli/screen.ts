@@ -11,7 +11,7 @@ import { metricPairs, readText, required, unknownVerb } from "./args.ts";
 import { collect, type Emit, handler, withDb } from "./command.ts";
 import { JanusError } from "../output.ts";
 
-type RecordOpts = { metric: string[]; rationale?: string; date?: string; force?: boolean };
+type RecordOpts = { metric: string[]; rationale?: string; date?: string; force?: boolean; binaryDate?: string; binaryReason?: string };
 
 export function build(emit: Emit): Command {
   const cmd = new Command("screen")
@@ -23,6 +23,8 @@ export function build(emit: Emit): Command {
     .argument("[symbol]", "market symbol")
     .option("--metric <KEY=VALUE>", "what the read observed; repeatable", collect)
     .option("--rationale <TEXT>", "free text; - reads stdin")
+    .option("--binary-date <YYYY-MM-DD>", "date of a known binary event; blocks entry until passed")
+    .option("--binary-reason <TEXT>", "description of the binary event")
     .option("--date <YYYY-MM-DD>", "address an existing session")
     .option("--force", "run out of phase order")
     .action(async (symbol: string | undefined, opts: RecordOpts) => emit(await record(symbol, opts)));
@@ -67,6 +69,8 @@ function record(symbol: string | undefined, opts: RecordOpts): Promise<unknown> 
     recordScreen(db, session.session_date, asset.id, {
       flagged,
       rationale: readText(opts.rationale) ?? null,
+      binary_date: opts.binaryDate ?? null,
+      binary_reason: opts.binaryReason ?? null,
       metrics,
       results,
     }, now);
@@ -79,6 +83,8 @@ function record(symbol: string | undefined, opts: RecordOpts): Promise<unknown> 
       session_date: session.session_date,
       symbol: asset.symbol,
       metrics, results, flagged,
+      binary_date: opts.binaryDate ?? null,
+      binary_reason: opts.binaryReason ?? null,
       screened: countScreened(db, session.session_date),
       of: countCoverage(db, session.session_date),
       phase_complete: complete,

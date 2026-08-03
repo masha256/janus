@@ -262,9 +262,65 @@ weights, sentiment, agreement, and confidence it used onto the row.
 `strength` and `conviction` are the two standardised numbers the directive is
 derived from — see the parameter table below for the thresholds each one gates.
 
-**All four formulas are v1 placeholders**, marked as such in their own files. Every
+****All four formulas are v1 placeholders**, marked as such in their own files. Every
 constant in them is a tunable parameter, so calibrating needs no code change, and
 replacing one outright is a one-file edit — nothing outside a formula's module reads it.
+
+## Scoring gates
+
+`deriveScore` runs six independent gates and folds their results into a `size_tier`
+(`blocked`, `starter`, or `full`) and a final directive
+(`INITIATE`/`ADD`/`HOLD`/`TRIM`/`EXIT`/`STAND_ASIDE`). Each gate reports its own
+status in `plan` so the operator can see exactly why an entry was allowed, reduced,
+or blocked.
+
+| Gate | Purpose | Result values |
+| --- | --- | --- |
+| `signalGate` | Strength/conviction thresholds for initiate, add, and exit. | `pass` / `fail` |
+| `persistenceGate` | Signal must persist for `signal_persist_days` run-days. | `pass` / `fail` / `insufficient_history` |
+| `trendGate` | Price/MA structure for the proposed direction. | `pass` / `starter` / `fail` / `late_trend` |
+| `binaryGate` | Blocks entry around a known binary event recorded on the screen. | `pass` / `blocked` |
+| `heatGate` | Account-level risk heat (stubbed until sizing is built). | `pass` / `blocked` |
+| `flipflopGate` | After an exit, opposite-side re-entry needs a stronger, persisted signal. | `pass` / `blocked` / `n/a` |
+
+**Gate parameter reference** (all resolve through `cluster_param → global_param → built-in default`):
+
+| Parameter | Gate | Default | Description |
+| --- | --- | --- | --- |
+| `signal_strength_initiate` | signalGate | `1.0` | Minimum `\|strength\|` for a flat asset to pass the signal gate. |
+| `signal_conviction_initiate` | signalGate | `6` | Minimum `conviction` for a flat asset to pass the signal gate. |
+| `signal_strength_add` | signalGate | `1.0` | Minimum `\|strength\|` for an aligned position to pass the signal gate for adding. |
+| `signal_conviction_add` | signalGate | `7` | Minimum `conviction` for an aligned position to pass the signal gate for adding. |
+| `signal_strength_exit` | signalGate | `1.0` | Minimum `\|strength\|` against an open position to pass the signal gate for exit. |
+| `signal_persist_days` | persistenceGate | `1` | Run-days the signal gate must have passed, including today. |
+| `trend_sma20_cushion_long` | trendGate | `0` | Minimum `px_vs_sma20` percent for long entry/add to pass. |
+| `trend_sma20_cushion_short` | trendGate | `0` | Maximum `px_vs_sma20` percent for short entry/add to pass. |
+| `trend_sma50_cushion_long` | trendGate | `1.0` | Minimum `px_vs_sma50` percent for long entry/add to pass. |
+| `trend_sma50_cushion_short` | trendGate | `-1.0` | Maximum `px_vs_sma50` percent for short entry/add to pass. |
+| `require_golden_for_long` | trendGate | `1` | When `1`, long entries are blocked if `cross_50_200` is `death`. |
+| `require_death_for_short` | trendGate | `1` | When `1`, short entries are blocked if `cross_50_200` is `golden`. |
+| `late_trend_ma_distance` | trendGate | `20` | Distance beyond the 200-day MA that, with extreme crowding, marks a move as `late_trend`. |
+| `late_trend_crowding_extreme` | trendGate | `85` | Crowding level that, with a stretched 200-day MA distance, marks a move as `late_trend`. |
+| `binary_cooldown_days` | binaryGate | `14` | Days after a recorded binary event during which entry is blocked. |
+| `flipflop_cooldown_days` | flipflopGate | `5` | Days after an exit during which opposite-side re-entry faces extra scrutiny. |
+| `flipflop_opposite_strength_min` | flipflopGate | `0.6` | Minimum `\|strength\|` for opposite-side re-entry during the flipflop cooldown. |
+| `flipflop_opposite_persist_days` | flipflopGate | `3` | Run-days the opposite-side signal must have persisted to override the flipflop cooldown. |
+| `account_capital` | heatGate | `0` | Account capital declared for the book; currently accepted but not enforced. |
+| `max_heat_pct` | heatGate | `100` | Account-level heat ceiling; currently accepted but not enforced. |
+| `per_trade_max_risk_pct` | heatGate | `2` | Per-trade risk ceiling; currently accepted but not enforced. |
+| `per_asset_max_notional` | heatGate | `0` | Per-asset notional ceiling; currently accepted but not enforced. |
+
+`trendGate` is a three-tier gate. For a long, price must be above the 20-day and
+50-day MAs (`starter` is not used for longs at the moment; pass/fail only). For a
+short, price below both 20-day and 50-day MAs is `pass`; between the two is `starter`.
+If price has extended ≥ `late_trend_ma_distance` percent beyond the 200-day MA and
+crowding is ≥ `late_trend_crowding_extreme`, the gate returns `late_trend`, which
+still allows a `starter` tier but warns that the move is stretched.
+
+`size_tier` becomes `blocked` if any gate blocks it. It becomes `starter` when no
+gate blocks but at least one gate returns `starter` or `insufficient_history`.
+Otherwise it is `full`. Entries use `size_tier` to decide how aggressively to size;
+HOLD/EXIT/TRIM directives still carry the gate status for observability.
 
 ## Parameters
 
@@ -281,46 +337,20 @@ for a cluster. An asset with no cluster resolves against `global_param` and the 
 Defaults (`domain/params.ts` is the authority): `beta_factor 1.0`,
 `screen_threshold 1.0`, `w_catalyst 0.25`, `w_sentiment 0.25`, `w_trend 0.3`,
 `w_regime 0.15`, `w_secular 0.05`, `fear_premium 1.25`, `divergence_boost 0.5`,
-`min_history_bars 200`, `max_units 3`.
-
-Directive ladder thresholds are active: `strength_initiate 1.0`, `conv_initiate 6`,
-`strength_add 1.0`, `conv_add 7`, `conv_hold 4`, `strength_exit 1.0`. Trend/MA structure is a
-hard entry/scaling gate via `trend_gate_long 1.0`, `trend_gate_short -1.0`,
-`require_golden_for_long 1`, `require_death_for_short 1`. Regime is context plus
-an extreme-contrarian trigger: `regime_trigger_long_max 1.5`,
-`regime_trigger_short_min -1.5`, `regime_force_exit_threshold 1.8`. The persistence
-rule resists flip-flopping unless an actionable signal appears:
-`actionable_catalyst_min 1.5`, `actionable_strength_delta 2.5`.
+`min_history_bars 200`, `max_units 3`, plus the gate parameters documented in the
+**Scoring gates** section above.
 
 The macro read is session-wide, so it resolves against the global rung only; a cluster
 read resolves against its own cluster first, like everything else.
-
-### The directive ladder
-
-`deriveScore` now turns `strength`, `conviction`, the open position, the trend/MA gate,
-and the regime trigger into `INITIATE`/`ADD`/`HOLD`/`TRIM`/`EXIT`/`STAND_ASIDE`. Most runs
-return `HOLD` — meaning thesis intact — unless an actionable new signal appears or the
-score flips hard enough to force an exit. The ladder also returns an actionable sub-plan
-(`plan`) with trend-gate status, persistence rule, and stop/trim hints; the operator
-still executes every change manually via the `trade` commands.
-
-| Parameter | Guards |
-| --- | --- |
-| `strength_initiate`, `conv_initiate` | Flat + trend gate pass → `INITIATE` |
-| `strength_add`, `conv_add` | Holding + working + trend gate pass → `ADD` |
-| `conv_hold` | The conviction floor; below it, `TRIM` or `HOLD` |
-| `strength_exit` | How hard the score must argue against an open position to become `EXIT` |
-| `max_units` | The ceiling on stacked adds |
-
-
 
 ### Parameter reference
 
 All parameters resolve through `cluster_param → global_param → built-in default`.
 Set a global with `janus param set <key> <value>` or a cluster override with
-`janus cluster set-param <key> <param> <value>`.
+`janus cluster set-param <key> <param> <value>`. Gate parameters are documented in
+the **Scoring gates** section above.
 
-| Parameter | Phase | Default | Description |
+| Parameter | Scope | Default | Description |
 | --- | --- | --- | --- |
 | `beta_factor` | screen | `1.0` | Multiplier applied to the raw screen score before the threshold check. |
 | `screen_threshold` | screen | `1.0` | Minimum `screen_score` for an asset to be flagged for the scoring queue. |
@@ -333,20 +363,10 @@ Set a global with `janus param set <key> <value>` or a cluster override with
 | `divergence_boost` | score | `0.5` | Widens a contrarian fade when a price/crowding divergence is present. |
 | `min_history_bars` | asset | `200` | Minimum listed bars for an asset to be added to the roster; below this a 200-day MA is impossible. |
 | `max_units` | directive | `3` | Ceiling on how many units can be stacked into one trade via `ADD`. |
-| `strength_initiate` | directive | `1.0` | Minimum `\|strength\|` for a flat asset to receive `INITIATE`. |
-| `conv_initiate` | directive | `6` | Minimum `conviction` for a flat asset to receive `INITIATE`. |
-| `strength_add` | directive | `1.0` | Minimum `\|strength\|` for a working hold to receive `ADD`. |
-| `conv_add` | directive | `7` | Minimum `conviction` for a working hold to receive `ADD`. |
 | `conv_hold` | directive | `4` | Conviction floor for staying put; below it the ladder downgrades to `TRIM` or `HOLD`. |
-| `strength_exit` | directive | `1.0` | Minimum `\|strength\|` against an open position to trigger `EXIT` instead of `TRIM`. |
-| `trend_gate_long` | directive | `1.0` | Minimum `px_vs_sma50` percent for long `INITIATE`/`ADD` to pass the trend gate. |
-| `trend_gate_short` | directive | `-1.0` | Maximum `px_vs_sma50` percent for short `INITIATE`/`ADD` to pass the trend gate. |
-| `require_golden_for_long` | directive | `1` | When `1`, long entries are blocked if `cross_50_200` is `death`. |
-| `require_death_for_short` | directive | `1` | When `1`, short entries are blocked if `cross_50_200` is `golden`. |
 | `regime_trigger_long_max` | directive | `1.5` | Block new longs and force long exits when `regime_smile` reaches this positive extreme. |
 | `regime_trigger_short_min` | directive | `-1.5` | Block new shorts and force short exits when `regime_smile` reaches this negative extreme. |
 | `regime_force_exit_threshold` | directive | `1.8` | Force a full `EXIT` when `regime_smile` exceeds this against an open position. |
-| `flip_flop_lookback_days` | directive | `5` | How many days back the persistence rule checks for a prior score. |
 | `actionable_catalyst_min` | directive | `1.5` | Minimum `\|catalyst\|` that counts as an actionable new signal for the persistence rule. |
 | `actionable_strength_delta` | directive | `2.5` | Minimum change in `\|strength\|` from the prior score that counts as actionable. |
 

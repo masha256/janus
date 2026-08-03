@@ -5,6 +5,9 @@ export type ScreenInput = {
   /** The formula's call on whether this asset makes the scoring queue. */
   flagged: boolean;
   rationale: string | null;
+  /** Optional known binary event flagged during this screen. */
+  binary_date?: string | null;
+  binary_reason?: string | null;
   /** What was observed. */
   metrics: Metrics;
   /** What the formula concluded — the threshold in force, and whatever else it keeps. */
@@ -22,12 +25,13 @@ export function recordScreen(
   db.exec("BEGIN");
   try {
     db.prepare(
-      `INSERT INTO screen (session_date, asset_id, flagged, rationale, recorded_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO screen (session_date, asset_id, flagged, rationale, binary_date, binary_reason, recorded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(session_date, asset_id) DO UPDATE SET
          flagged = excluded.flagged, rationale = excluded.rationale,
+         binary_date = excluded.binary_date, binary_reason = excluded.binary_reason,
          recorded_at = excluded.recorded_at`,
-    ).run(date, assetId, input.flagged ? 1 : 0, input.rationale, now);
+    ).run(date, assetId, input.flagged ? 1 : 0, input.rationale, input.binary_date ?? null, input.binary_reason ?? null, now);
     replaceMetrics(db, "screen_metric", scope, input.metrics);
     replaceMetrics(db, "screen_result", scope, input.results);
     db.exec("COMMIT");
@@ -42,14 +46,16 @@ export function getScreen(
   db: DatabaseSync,
   date: string,
   assetId: number,
-): { flagged: boolean; metrics: Metrics; results: Metrics } | null {
+): { flagged: boolean; binary_date: string | null; binary_reason: string | null; metrics: Metrics; results: Metrics } | null {
   const scope = { session_date: date, asset_id: assetId };
   const row = db
-    .prepare("SELECT flagged FROM screen WHERE session_date = ? AND asset_id = ?")
-    .get(date, assetId) as { flagged: number } | undefined;
+    .prepare("SELECT flagged, binary_date, binary_reason FROM screen WHERE session_date = ? AND asset_id = ?")
+    .get(date, assetId) as { flagged: number; binary_date: string | null; binary_reason: string | null } | undefined;
   if (row === undefined) return null;
   return {
     flagged: row.flagged === 1,
+    binary_date: row.binary_date,
+    binary_reason: row.binary_reason,
     metrics: readMetrics(db, "screen_metric", scope),
     results: readMetrics(db, "screen_result", scope),
   };

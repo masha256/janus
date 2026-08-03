@@ -11,6 +11,7 @@ const flat: ScoreContext = {
   screen: { flagged: false, metrics: { score: 1 }, results: { screen_score: 0.5, threshold: 1, regime: 0, regime_smile: 0 } },
   positions: [],
   asset: { symbol: "BTC", class: "crypto", cluster_id: null, coverage: null },
+  session_date: "2026-07-31",
 };
 
 const ctx = (macroRegime: number, clusterRegime: number | null): ScoreContext => ({
@@ -379,13 +380,20 @@ test("holding long + regime extreme bullish forces EXIT", () => {
 test("persistence rule downgrades fresh EXIT to TRIM without actionable signal", () => {
   const prev: import("./score.ts").ScoreResult = {
     strength: 1.2, conviction: 8, directive: "HOLD",
-    plan: { directive: "HOLD", reason: "thesis intact", trend_gate: "pass" },
+    plan: {
+      directive: "HOLD", reason: "thesis intact", size_tier: "full",
+      signal_gate: "pass", persistence_gate: "pass", trend_gate: "pass",
+      binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a",
+    },
     results: {},
   };
+  // Raise actionable_strength_delta so the strength delta alone does not count
+  // as a fresh signal; no catalyst/divergence/capitulation is present either.
+  const params = { ...DEFAULT_PARAMS, actionable_strength_delta: 5 };
   const got = deriveScore(
     m(-1, -2, -2, 50, false, false),
     ctxWithPosition(longPos(2), coverage(), prev),
-    DEFAULT_PARAMS,
+    params,
   );
   assert.equal(got.directive, "TRIM");
   assert.equal(got.plan.persistence_rule, "maintain");
@@ -394,7 +402,11 @@ test("persistence rule downgrades fresh EXIT to TRIM without actionable signal",
 test("persistence rule allows EXIT when divergence is actionable", () => {
   const prev: import("./score.ts").ScoreResult = {
     strength: 1.2, conviction: 8, directive: "HOLD",
-    plan: { directive: "HOLD", reason: "thesis intact", trend_gate: "pass" },
+    plan: {
+      directive: "HOLD", reason: "thesis intact", size_tier: "full",
+      signal_gate: "pass", persistence_gate: "pass", trend_gate: "pass",
+      binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a",
+    },
     results: {},
   };
   const got = deriveScore(

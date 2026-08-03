@@ -9,10 +9,8 @@
  * cannot compute a 200-day MA, which a weeks-to-months swing thesis treats as
  * a hard gap.
  *
- * Directive ladder thresholds are also here. `strength_*` are on the same ±2
- * strength scale as the score; `conv_*` are on the 1..10 conviction scale.
- * Trend gate parameters make the MA structure a hard entry/scaling condition,
- * while regime trigger thresholds keep the extreme-contrarian override configurable.
+ * Gate parameters are also here. Each gate is a function in `domain/score.ts`
+ * and reads its own thresholds from the resolved params.
  */
 export const DEFAULT_PARAMS: Record<string, number> = {
   beta_factor: 1.0,
@@ -27,29 +25,39 @@ export const DEFAULT_PARAMS: Record<string, number> = {
   min_history_bars: 200,
   max_units: 3,
 
-  // Directive ladder (strength is -2..2, conviction is 1..10).
-  strength_initiate: 1.0,
-  conv_initiate: 6,
-  strength_add: 1.0,
-  conv_add: 7,
-  conv_hold: 4,
-  strength_exit: 1.0,
+  // signalGate — strength and conviction thresholds.
+  signal_strength_initiate: 1.0,
+  signal_conviction_initiate: 6,
+  signal_strength_add: 1.0,
+  signal_conviction_add: 7,
+  signal_strength_exit: 1.0,
 
-  // Trend gate as hard condition, not a factor.
-  trend_gate_long: 1.0,        // min px_vs_sma50 % to allow long entry/add
-  trend_gate_short: -1.0,      // max px_vs_sma50 % to allow short entry/add
-  require_golden_for_long: 1,    // 1 = true: forbid long when 50/200 is death
-  require_death_for_short: 1,    // 1 = true: forbid short when 50/200 is golden
+  // persistenceGate — how many run-days the signalGate must have passed.
+  signal_persist_days: 1,
 
-  // Regime extreme-contrarian trigger thresholds.
-  regime_trigger_long_max: 1.5,  // block new longs when regime_smile >= this
-  regime_trigger_short_min: -1.5, // block new shorts when regime_smile <= this
-  regime_force_exit_threshold: 1.8, // force EXIT when regime_smile exceeds this against position
+  // trendGate — MA cushions and late-trend caution thresholds.
+  trend_sma20_cushion_long: 0,
+  trend_sma20_cushion_short: 0,
+  trend_sma50_cushion_long: 1.0,
+  trend_sma50_cushion_short: -1.0,
+  require_golden_for_long: 1,
+  require_death_for_short: 1,
+  late_trend_ma_distance: 20,
+  late_trend_crowding_extreme: 85,
 
-  // Persistence / anti flip-flop.
-  flip_flop_lookback_days: 5,
-  actionable_catalyst_min: 1.5,
-  actionable_strength_delta: 2.5,
+  // binaryGate — cooldown after a known binary event.
+  binary_cooldown_days: 14,
+
+  // flipflopGate — cooldown and opposite-direction re-entry rules.
+  flipflop_cooldown_days: 5,
+  flipflop_opposite_strength_min: 0.6,
+  flipflop_opposite_persist_days: 3,
+
+  // heatGate — account-level risk heat (stubbed until sizing is built).
+  account_capital: 0,
+  max_heat_pct: 100,
+  per_trade_max_risk_pct: 2,
+  per_asset_max_notional: 0,
 };
 
 export function resolveParams(

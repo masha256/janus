@@ -2,7 +2,10 @@ import { Command } from "commander";
 import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
 import { requireAssetBySymbol } from "../db/repo/asset.ts";
 import { getClusterParams, getGlobalParams } from "../db/repo/cluster.ts";
-import { scoreQueue, positionOf, openPositions, recordScore, listScores, previousScore, getScore } from "../db/repo/score.ts";
+import {
+  scoreQueue, positionOf, openPositions, recordScore, listScores, previousScore, getScore,
+  recentScores, lastTradeExit,
+} from "../db/repo/score.ts";
 import { getMacro, getClusterRead } from "../db/repo/phase.ts";
 import { listCoverage, getCoverage } from "../db/repo/coverage.ts";
 import { listScreen, getScreen } from "../db/repo/screen.ts";
@@ -98,12 +101,14 @@ function record(symbol: string | undefined, opts: RecordOpts): Promise<unknown> 
     // Everything the session already concluded, top down, plus the whole book.
     // The previous score is loaded so the persistence rule can resist flip-flopping.
     const previous = previousScore(db, asset.id, session.session_date);
+    const recent = recentScores(db, asset.id, session.session_date, params["signal_persist_days"] ?? 1);
+    const screen = getScreen(db, session.session_date, asset.id);
     const context = {
       macro: getMacro(db, session.session_date),
       cluster: asset.cluster_id === null
         ? null
         : getClusterRead(db, session.session_date, asset.cluster_id),
-      screen: getScreen(db, session.session_date, asset.id),
+      screen,
       positions: openPositions(db),
       asset: {
         symbol: asset.symbol,
@@ -111,6 +116,11 @@ function record(symbol: string | undefined, opts: RecordOpts): Promise<unknown> 
         cluster_id: asset.cluster_id,
         coverage: getCoverage(db, session.session_date, asset.id),
       },
+      session_date: session.session_date,
+      recent_scores: recent,
+      last_exit: lastTradeExit(db, asset.id, session.session_date),
+      binary: screen === null ? null : { date: screen.binary_date, reason: screen.binary_reason },
+      account_capital: params["account_capital"] ?? 0,
       previous_score: previous,
     };
 

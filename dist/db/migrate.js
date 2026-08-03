@@ -234,6 +234,10 @@ CREATE TABLE trade_unit (
     // target specific units (runner, core) in its trim/stop plans.
     `ALTER TABLE trade_unit ADD COLUMN funding REAL DEFAULT 0;
 ALTER TABLE trade_unit ADD COLUMN tag TEXT;`,
+    // A screen can flag a known binary event. Scoring reads it to enforce a
+    // no-entry cooldown until the event date passes.
+    `ALTER TABLE screen ADD COLUMN binary_date TEXT;
+ALTER TABLE screen ADD COLUMN binary_reason TEXT;`,
 ];
 export function migrate(db) {
     const row = db.prepare("PRAGMA user_version").get();

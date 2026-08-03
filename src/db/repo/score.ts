@@ -114,6 +114,69 @@ export function recordScore(
   }
 }
 
+/** The N most recent scores for an asset before the given session, newest first. */
+export function recentScores(
+  db: DatabaseSync,
+  assetId: number,
+  beforeDate: string,
+  limit: number,
+): import("../../domain/score.ts").ScoreResult[] {
+  const rows = db
+    .prepare(
+      `SELECT session_date, asset_id, strength, conviction, directive, queue_reason, position_state, rationale
+       FROM score WHERE asset_id = ? AND session_date < ? ORDER BY session_date DESC LIMIT ?`,
+    )
+    .all(assetId, beforeDate, limit) as { session_date: string; asset_id: number; strength: number; conviction: number; directive: string; queue_reason: string; position_state: string; rationale: string | null }[];
+
+  return rows.map((row) => {
+    const metrics = metricsByEntity(db, "score_metric", "asset_id", row.session_date);
+    const results = metricsByEntity(db, "score_result", "asset_id", row.session_date);
+    const r = results.get(row.asset_id) ?? {};
+    const plan = scorePlanFromResultsStatic(r);
+    return {
+      strength: row.strength,
+      conviction: row.conviction,
+      directive: row.directive as import("../../domain/directive.ts").Directive,
+      plan: plan ?? {
+        directive: row.directive as import("../../domain/directive.ts").Directive,
+        reason: "recovered from legacy score",
+        size_tier: "full",
+        signal_gate: "pass",
+        persistence_gate: "pass",
+        trend_gate: "pass",
+        binary_gate: "pass",
+        heat_gate: "pass",
+        flipflop_gate: "n/a",
+      },
+      results: r,
+    };
+  });
+}
+
+/** The most recent closed trade exit for an asset before the given session, if any. */
+export function lastTradeExit(
+  db: DatabaseSync,
+  assetId: number,
+  beforeDate: string,
+): { session_date: string; side: "long" | "short"; units: number } | null {
+  const row = db
+    .prepare(
+      `SELECT t.closed_on, t.direction, COUNT(u.id) AS units
+       FROM trade t LEFT JOIN trade_unit u ON u.trade_id = t.id
+       WHERE t.asset_id = ? AND t.status = 'closed' AND t.closed_on < ?
+       GROUP BY t.id
+       ORDER BY t.closed_on DESC, t.id DESC
+       LIMIT 1`,
+    )
+    .get(assetId, beforeDate) as { closed_on: string; direction: "long" | "short"; units: number } | undefined;
+  if (row === undefined || row.units === 0) return null;
+  return {
+    session_date: row.closed_on,
+    side: row.direction,
+    units: row.units,
+  };
+}
+
 /** The most recent score for an asset before the given session, if any. */
 export function previousScore(
   db: DatabaseSync,
@@ -137,7 +200,13 @@ export function previousScore(
       plan: plan ?? {
         directive: row.directive as import("../../domain/directive.ts").Directive,
         reason: "recovered from legacy score",
+        size_tier: "full",
+        signal_gate: "pass",
+        persistence_gate: "pass",
         trend_gate: "pass",
+        binary_gate: "pass",
+        heat_gate: "pass",
+        flipflop_gate: "n/a",
       },
       results: r,
     };
@@ -148,12 +217,18 @@ function scorePlanFromResultsStatic(
 ): import("../../domain/directive.ts").ScorePlan | undefined {
   const directive = results["plan_directive"] as import("../../domain/directive.ts").Directive | undefined;
   if (directive === undefined) return undefined;
-  const trend_gate = results["trend_gate"] as "pass" | "fail" | undefined;
-  if (trend_gate === undefined) return undefined;
+  const size_tier = results["size_tier"] as import("../../domain/directive.ts").ScorePlan["size_tier"] | undefined;
+  if (size_tier === undefined) return undefined;
   const plan: import("../../domain/directive.ts").ScorePlan = {
     directive,
     reason: String(results["directive_reason"] ?? ""),
-    trend_gate,
+    size_tier,
+    signal_gate: (results["signal_gate"] as import("../../domain/directive.ts").ScorePlan["signal_gate"]) ?? "fail",
+    persistence_gate: (results["persistence_gate"] as import("../../domain/directive.ts").ScorePlan["persistence_gate"]) ?? "insufficient_history",
+    trend_gate: (results["trend_gate"] as import("../../domain/directive.ts").ScorePlan["trend_gate"]) ?? "fail",
+    binary_gate: (results["binary_gate"] as import("../../domain/directive.ts").ScorePlan["binary_gate"]) ?? "pass",
+    heat_gate: (results["heat_gate"] as import("../../domain/directive.ts").ScorePlan["heat_gate"]) ?? "pass",
+    flipflop_gate: (results["flipflop_gate"] as import("../../domain/directive.ts").ScorePlan["flipflop_gate"]) ?? "n/a",
     regime_trigger: (results["regime_trigger"] as import("../../domain/directive.ts").ScorePlan["regime_trigger"]) ?? "none",
     persistence_rule: (results["persistence_rule"] as import("../../domain/directive.ts").ScorePlan["persistence_rule"]) ?? undefined,
   };

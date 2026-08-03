@@ -3,11 +3,12 @@ export function recordScreen(db, date, assetId, input, now) {
     const scope = { session_date: date, asset_id: assetId };
     db.exec("BEGIN");
     try {
-        db.prepare(`INSERT INTO screen (session_date, asset_id, flagged, rationale, recorded_at)
-       VALUES (?, ?, ?, ?, ?)
+        db.prepare(`INSERT INTO screen (session_date, asset_id, flagged, rationale, binary_date, binary_reason, recorded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(session_date, asset_id) DO UPDATE SET
          flagged = excluded.flagged, rationale = excluded.rationale,
-         recorded_at = excluded.recorded_at`).run(date, assetId, input.flagged ? 1 : 0, input.rationale, now);
+         binary_date = excluded.binary_date, binary_reason = excluded.binary_reason,
+         recorded_at = excluded.recorded_at`).run(date, assetId, input.flagged ? 1 : 0, input.rationale, input.binary_date ?? null, input.binary_reason ?? null, now);
         replaceMetrics(db, "screen_metric", scope, input.metrics);
         replaceMetrics(db, "screen_result", scope, input.results);
         db.exec("COMMIT");
@@ -21,12 +22,14 @@ export function recordScreen(db, date, assetId, input, now) {
 export function getScreen(db, date, assetId) {
     const scope = { session_date: date, asset_id: assetId };
     const row = db
-        .prepare("SELECT flagged FROM screen WHERE session_date = ? AND asset_id = ?")
+        .prepare("SELECT flagged, binary_date, binary_reason FROM screen WHERE session_date = ? AND asset_id = ?")
         .get(date, assetId);
     if (row === undefined)
         return null;
     return {
         flagged: row.flagged === 1,
+        binary_date: row.binary_date,
+        binary_reason: row.binary_reason,
         metrics: readMetrics(db, "screen_metric", scope),
         results: readMetrics(db, "screen_result", scope),
     };

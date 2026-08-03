@@ -33,8 +33,16 @@ export type ScorePlan = {
   /** Human-readable summary of why the ladder chose this directive. */
   reason: string;
 
-  /** Did the trend/MA hard gate pass for the chosen direction? */
-  trend_gate: "pass" | "fail";
+  /** Which sizing tier the combined gates allow. */
+  size_tier: "blocked" | "starter" | "full";
+
+  /** Individual gate results for observability. */
+  signal_gate: "pass" | "fail";
+  persistence_gate: "pass" | "fail" | "insufficient_history";
+  trend_gate: "pass" | "starter" | "fail" | "late_trend";
+  binary_gate: "pass" | "blocked";
+  heat_gate: "pass" | "blocked";
+  flipflop_gate: "pass" | "blocked" | "n/a";
 
   /** Was an extreme-contrarian regime trigger active? */
   regime_trigger?: "none" | "extreme_bull" | "extreme_bear";
@@ -65,7 +73,16 @@ export type ScorePlan = {
 };
 
 export function formatPlan(plan: ScorePlan): string {
-  const parts: string[] = [`${plan.directive} (${plan.reason})`, `trend_gate=${plan.trend_gate}`];
+  const parts: string[] = [
+    `${plan.directive} (${plan.reason})`,
+    `size_tier=${plan.size_tier}`,
+    `signal=${plan.signal_gate}`,
+    `persist=${plan.persistence_gate}`,
+    `trend=${plan.trend_gate}`,
+    `binary=${plan.binary_gate}`,
+    `heat=${plan.heat_gate}`,
+    `flipflop=${plan.flipflop_gate}`,
+  ];
   if (plan.regime_trigger && plan.regime_trigger !== "none") {
     parts.push(`regime_trigger=${plan.regime_trigger}`);
   }
@@ -85,7 +102,13 @@ export function formatPlan(plan: ScorePlan): string {
 export function planResults(plan: ScorePlan): Record<string, number | string> {
   const r: Record<string, number | string> = {
     directive_reason: plan.reason,
+    size_tier: plan.size_tier,
+    signal_gate: plan.signal_gate,
+    persistence_gate: plan.persistence_gate,
     trend_gate: plan.trend_gate,
+    binary_gate: plan.binary_gate,
+    heat_gate: plan.heat_gate,
+    flipflop_gate: plan.flipflop_gate,
     persistence_rule: plan.persistence_rule ?? "n/a",
   };
   if (plan.regime_trigger && plan.regime_trigger !== "none") {
@@ -110,12 +133,18 @@ export function planResults(plan: ScorePlan): Record<string, number | string> {
 export function scorePlanFromResults(results: Record<string, unknown>): ScorePlan | undefined {
   const directive = results["plan_directive"] as Directive | undefined;
   if (directive === undefined) return undefined;
-  const trend_gate = results["trend_gate"] as "pass" | "fail" | undefined;
-  if (trend_gate === undefined) return undefined;
+  const size_tier = results["size_tier"] as ScorePlan["size_tier"] | undefined;
+  if (size_tier === undefined) return undefined;
   const plan: ScorePlan = {
     directive,
     reason: String(results["directive_reason"] ?? ""),
-    trend_gate,
+    size_tier,
+    signal_gate: (results["signal_gate"] as ScorePlan["signal_gate"]) ?? "fail",
+    persistence_gate: (results["persistence_gate"] as ScorePlan["persistence_gate"]) ?? "insufficient_history",
+    trend_gate: (results["trend_gate"] as ScorePlan["trend_gate"]) ?? "fail",
+    binary_gate: (results["binary_gate"] as ScorePlan["binary_gate"]) ?? "pass",
+    heat_gate: (results["heat_gate"] as ScorePlan["heat_gate"]) ?? "pass",
+    flipflop_gate: (results["flipflop_gate"] as ScorePlan["flipflop_gate"]) ?? "n/a",
     regime_trigger: (results["regime_trigger"] as ScorePlan["regime_trigger"]) ?? "none",
     persistence_rule: (results["persistence_rule"] as ScorePlan["persistence_rule"]) ?? undefined,
   };

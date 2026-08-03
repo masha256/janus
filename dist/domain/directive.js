@@ -2,7 +2,16 @@ export function formatPosition(pos) {
     return pos.side === null ? "flat" : `${pos.side}:${pos.units}`;
 }
 export function formatPlan(plan) {
-    const parts = [`${plan.directive} (${plan.reason})`, `trend_gate=${plan.trend_gate}`];
+    const parts = [
+        `${plan.directive} (${plan.reason})`,
+        `size_tier=${plan.size_tier}`,
+        `signal=${plan.signal_gate}`,
+        `persist=${plan.persistence_gate}`,
+        `trend=${plan.trend_gate}`,
+        `binary=${plan.binary_gate}`,
+        `heat=${plan.heat_gate}`,
+        `flipflop=${plan.flipflop_gate}`,
+    ];
     if (plan.regime_trigger && plan.regime_trigger !== "none") {
         parts.push(`regime_trigger=${plan.regime_trigger}`);
     }
@@ -20,7 +29,13 @@ export function formatPlan(plan) {
 export function planResults(plan) {
     const r = {
         directive_reason: plan.reason,
+        size_tier: plan.size_tier,
+        signal_gate: plan.signal_gate,
+        persistence_gate: plan.persistence_gate,
         trend_gate: plan.trend_gate,
+        binary_gate: plan.binary_gate,
+        heat_gate: plan.heat_gate,
+        flipflop_gate: plan.flipflop_gate,
         persistence_rule: plan.persistence_rule ?? "n/a",
     };
     if (plan.regime_trigger && plan.regime_trigger !== "none") {
@@ -45,13 +60,19 @@ export function scorePlanFromResults(results) {
     const directive = results["plan_directive"];
     if (directive === undefined)
         return undefined;
-    const trend_gate = results["trend_gate"];
-    if (trend_gate === undefined)
+    const size_tier = results["size_tier"];
+    if (size_tier === undefined)
         return undefined;
     const plan = {
         directive,
         reason: String(results["directive_reason"] ?? ""),
-        trend_gate,
+        size_tier,
+        signal_gate: results["signal_gate"] ?? "fail",
+        persistence_gate: results["persistence_gate"] ?? "insufficient_history",
+        trend_gate: results["trend_gate"] ?? "fail",
+        binary_gate: results["binary_gate"] ?? "pass",
+        heat_gate: results["heat_gate"] ?? "pass",
+        flipflop_gate: results["flipflop_gate"] ?? "n/a",
         regime_trigger: results["regime_trigger"] ?? "none",
         persistence_rule: results["persistence_rule"] ?? undefined,
     };

@@ -19,6 +19,8 @@ export function build(emit) {
         .argument("[symbol]", "market symbol")
         .option("--metric <KEY=VALUE>", "what the read observed; repeatable", collect)
         .option("--rationale <TEXT>", "free text; - reads stdin")
+        .option("--binary-date <YYYY-MM-DD>", "date of a known binary event; blocks entry until passed")
+        .option("--binary-reason <TEXT>", "description of the binary event")
         .option("--date <YYYY-MM-DD>", "address an existing session")
         .option("--force", "run out of phase order")
         .action(async (symbol, opts) => emit(await record(symbol, opts)));
@@ -55,6 +57,8 @@ function record(symbol, opts) {
         recordScreen(db, session.session_date, asset.id, {
             flagged,
             rationale: readText(opts.rationale) ?? null,
+            binary_date: opts.binaryDate ?? null,
+            binary_reason: opts.binaryReason ?? null,
             metrics,
             results,
         }, now);
@@ -66,6 +70,8 @@ function record(symbol, opts) {
             session_date: session.session_date,
             symbol: asset.symbol,
             metrics, results, flagged,
+            binary_date: opts.binaryDate ?? null,
+            binary_reason: opts.binaryReason ?? null,
             screened: countScreened(db, session.session_date),
             of: countCoverage(db, session.session_date),
             phase_complete: complete,
