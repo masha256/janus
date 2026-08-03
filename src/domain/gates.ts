@@ -50,6 +50,7 @@ export function persistenceGate(
     return required === 1 ? "pass" : "insufficient_history";
   }
 
+
   const strengthInitiate = params["signal_strength_initiate"] ?? 1.0;
   const convInitiate = params["signal_conviction_initiate"] ?? 6;
 
@@ -175,7 +176,7 @@ export function actionableNewSignal(
   params: Record<string, number>,
 ): boolean {
   const catalystMin = params["actionable_catalyst_min"] ?? 1.5;
-  const strengthDelta = params["actionable_strength_delta"] ?? 1.0;
+  const strengthDelta = params["actionable_strength_delta"] ?? 1.5;
   if (context.screen?.metrics["capitulation"] ?? false) return true;
   if (context.screen?.metrics["divergence"] ?? false) return true;
   if (Math.abs(catalyst) >= catalystMin) return true;

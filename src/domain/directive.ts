@@ -197,5 +197,16 @@ export function scorePlanFromResults(results: Record<string, unknown>): ScorePla
       which: String(results["trim_which"] ?? "oldest") as NonNullable<ScorePlan["trim_plan"]>["which"],
     };
   }
+  const sizingNotional = results["sizing_suggested_notional"] as number | undefined;
+  if (sizingNotional !== undefined) {
+    plan.sizing_plan = {
+      suggested_notional: Number(sizingNotional),
+      risk_dollars: Number(results["sizing_risk_dollars"] ?? 0),
+      stop_distance_pct: Number(results["sizing_stop_distance_pct"] ?? 0),
+      stop_price: Number(results["sizing_stop_price"] ?? 0),
+      heat_after_trade: Number(results["sizing_heat_after_trade"] ?? 0),
+      per_asset_cap_dollars: Number(results["sizing_per_asset_cap_dollars"] ?? 0),
+    };
+  }
   return plan;
 }

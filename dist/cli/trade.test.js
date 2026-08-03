@@ -8,8 +8,15 @@ import { migrate } from "../db/migrate.js";
 import { upsertMarkets } from "../db/repo/market.js";
 import { addAsset, requireAssetBySymbol } from "../db/repo/asset.js";
 import { upsertCoverage } from "../db/repo/coverage.js";
-import { ensureSession } from "../db/repo/session.js";
+import { ensureSession, stampPhase } from "../db/repo/session.js";
 import { handle } from "./trade.js";
+import { recordMacro } from "../db/repo/phase.js";
+import { recordScreen } from "../db/repo/screen.js";
+import { recordScore, getScore } from "../db/repo/score.js";
+import { deriveScore } from "../domain/score.js";
+import { resolveParams } from "../domain/params.js";
+import { getGlobalParams, getClusterParams } from "../db/repo/cluster.js";
+import { planResults } from "../domain/directive.js";
 const NOW = "2026-07-31T12:00:00Z";
 const DATE = "2026-07-31";
 function freshDbFile() {
@@ -220,5 +227,98 @@ test("trade show warns when coverage is older than today", async () => {
 test("trade with no verb names the verbs instead of quoting undefined", async () => {
     await withHarness(async () => {
         await assert.rejects(() => handle(undefined, []), (e) => e.code === "VALIDATION" && e.message === "trade requires a verb; try: open, add-unit, set-stop, exit, list, show");
+    });
+});
+test("--size auto and --stop auto use the score plan sizing", async () => {
+    await withHarness(async (file) => {
+        // Seed a session with a bullish score plan for BTC.
+        withDb(file, (db) => {
+            ensureSession(db, DATE, NOW);
+            stampPhase(db, DATE, "macro", NOW);
+            stampPhase(db, DATE, "cluster", NOW);
+            stampPhase(db, DATE, "coverage", NOW);
+            stampPhase(db, DATE, "screen", NOW);
+            stampPhase(db, DATE, "score", NOW);
+            recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
+            const assetId = requireAssetBySymbol(db, "BTC").id;
+            upsertCoverage(db, DATE, [{
+                    asset_id: assetId,
+                    values: {
+                        open: 120, high: 135, low: 118, close: 130, volume: 1000,
+                        mark_price: 130, index_price: 130, open_interest: 100, daily_change_pct: 5,
+                        sma20: 120, sma50: 115, sma200: 110, ema12: 125, ema26: 122, atr14: 5,
+                        px_vs_sma20: 8, px_vs_sma50: 13, px_vs_sma200: 18,
+                        cross_50_200: "golden", cross_50_200_age: 10, cross_px_50: "above", cross_px_50_age: 10,
+                        bars_available: 250, fetched_at: NOW,
+                    },
+                }]);
+            recordScreen(db, DATE, assetId, { flagged: true, rationale: null, metrics: { score: 8, confidence: 0.9 }, results: { screen_score: 7.2, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+            const params = resolveParams(getClusterParams(db, null), getGlobalParams(db));
+            const coverageValues = {
+                open: 120, high: 135, low: 118, close: 130, volume: 1000,
+                mark_price: 130, index_price: 130, open_interest: 100, daily_change_pct: 5,
+                sma20: 120, sma50: 115, sma200: 110, ema12: 125, ema26: 122, atr14: 5,
+                px_vs_sma20: 8, px_vs_sma50: 13, px_vs_sma200: 18,
+                cross_50_200: "golden", cross_50_200_age: 10, cross_px_50: "above", cross_px_50_age: 10,
+                bars_available: 250, fetched_at: NOW,
+            };
+            const result = deriveScore({ catalyst: 2, trend: 2, secular: 2, crowding: 50, divergence: 0, confidence: 1 }, {
+                macro: { metrics: { regime: 1.5 }, results: {} },
+                cluster: null,
+                screen: {
+                    metrics: { score: 8, confidence: 0.9 },
+                    results: { screen_score: 7.2, threshold: 1, regime: 1.5, regime_smile: 0.9 },
+                    flagged: true,
+                },
+                positions: [],
+                asset: { symbol: "BTC", class: "crypto", cluster_id: null, coverage: coverageValues },
+                session_date: DATE,
+            }, params);
+            assert.equal(result.directive, "INITIATE", `expected INITIATE, got ${result.directive}`);
+            assert.ok(result.plan.sizing_plan, "plan should include sizing_plan");
+            recordScore(db, DATE, assetId, {
+                strength: result.strength,
+                conviction: result.conviction,
+                directive: result.directive,
+                queue_reason: "flagged",
+                position_state: "flat",
+                rationale: null,
+                metrics: { catalyst: 2, trend: 2, secular: 2, crowding: 50, divergence: 0, confidence: 1 },
+                results: { ...result.results, ...planResults(result.plan), plan_directive: result.plan.directive },
+                plan: result.plan,
+            }, NOW);
+        });
+        const opened = (await handle("open", ["BTC", "--direction", "long", "--price", "130", "--size", "auto", "--stop", "auto", "--date", DATE]));
+        assert.ok(opened.units[0], "opened trade has first unit");
+        assert.equal(opened.auto.size, true);
+        assert.equal(opened.auto.stop, true);
+        const scoreRow = getScore(openDb(file), DATE, requireAssetBySymbol(openDb(file), "BTC").id);
+        assert.ok(scoreRow, "score row exists");
+        assert.ok(scoreRow.plan, "score row has plan");
+        const sizingPlan = scoreRow.plan.sizing_plan;
+        assert.ok(sizingPlan, "stored plan has sizing_plan");
+        assert.equal(opened.units[0].notional, sizingPlan.suggested_notional);
+        assert.equal(opened.units[0].stop, sizingPlan.stop_price);
+        // Move mark higher and trail the stop automatically.
+        withDb(file, (db) => {
+            const assetId = requireAssetBySymbol(db, "BTC").id;
+            upsertCoverage(db, DATE, [{
+                    asset_id: assetId,
+                    values: {
+                        open: 130, high: 145, low: 128, close: 140, volume: 1200,
+                        mark_price: 140, index_price: 140, open_interest: 110, daily_change_pct: 7,
+                        sma20: 125, sma50: 118, sma200: 112, ema12: 130, ema26: 126, atr14: 5,
+                        px_vs_sma20: 12, px_vs_sma50: 18, px_vs_sma200: 25,
+                        cross_50_200: "golden", cross_50_200_age: 11, cross_px_50: "above", cross_px_50_age: 11,
+                        bars_available: 250, fetched_at: NOW,
+                    },
+                }]);
+        });
+        const tradeId = String(opened.trade.id);
+        const trailed = (await handle("set-stop", [tradeId, "--stop", "auto"]));
+        assert.equal(trailed.auto, true);
+        const firstUnit = trailed.units[0];
+        assert.ok(firstUnit, "trailed result has at least one unit");
+        assert.ok(firstUnit.stop > opened.units[0].stop, "trailing stop moved up for a long");
     });
 });

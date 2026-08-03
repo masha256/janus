@@ -342,3 +342,5 @@ test("an open position reaches the next scoring run", async () => {
   assert.equal(exited.body.data.summary.open_units, 0);
   assert.ok(exited.body.data.summary.r_multiple > 0);
 });
+
+

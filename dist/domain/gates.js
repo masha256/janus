@@ -132,7 +132,7 @@ export function regimeTriggerState(regimeSmile, params) {
 }
 export function actionableNewSignal(strength, catalyst, context, previousScore, params) {
     const catalystMin = params["actionable_catalyst_min"] ?? 1.5;
-    const strengthDelta = params["actionable_strength_delta"] ?? 1.0;
+    const strengthDelta = params["actionable_strength_delta"] ?? 1.5;
     if (context.screen?.metrics["capitulation"] ?? false)
         return true;
     if (context.screen?.metrics["divergence"] ?? false)

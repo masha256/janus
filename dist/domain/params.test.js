@@ -13,6 +13,22 @@ test("defaults match the spec", () => {
     assert.equal(DEFAULT_PARAMS["divergence_boost"], 0.5);
     assert.equal(DEFAULT_PARAMS["min_history_bars"], 200);
     assert.equal(DEFAULT_PARAMS["max_units"], 3);
+    assert.equal(DEFAULT_PARAMS["account_capital"], 100000);
+    assert.equal(DEFAULT_PARAMS["max_heat_pct"], 15);
+    assert.equal(DEFAULT_PARAMS["per_trade_max_risk_pct"], 5);
+    assert.equal(DEFAULT_PARAMS["per_asset_max_notional_pct"], 20);
+    assert.equal(DEFAULT_PARAMS["stop_atr_multiple"], 2);
+    assert.equal(DEFAULT_PARAMS["trailing_atr_multiple"], 2);
+    assert.equal(DEFAULT_PARAMS["breakeven_trigger_r"], 1);
+    assert.equal(DEFAULT_PARAMS["partial_trigger_r"], 1.5);
+    assert.equal(DEFAULT_PARAMS["partial_exit_fraction"], 0.5);
+    assert.equal(DEFAULT_PARAMS["max_time_stop_days"], 42);
+    assert.equal(DEFAULT_PARAMS["conv_hold"], 4);
+    assert.equal(DEFAULT_PARAMS["regime_trigger_long_max"], 1.5);
+    assert.equal(DEFAULT_PARAMS["regime_trigger_short_min"], -1.5);
+    assert.equal(DEFAULT_PARAMS["regime_force_exit_threshold"], 1.8);
+    assert.equal(DEFAULT_PARAMS["actionable_catalyst_min"], 1.5);
+    assert.equal(DEFAULT_PARAMS["actionable_strength_delta"], 1.5);
 });
 test("cluster beats global beats default", () => {
     const r = resolveParams({ w_catalyst: 2 }, { w_catalyst: 1.5, w_sentiment: 0.5 });

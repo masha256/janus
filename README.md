@@ -283,6 +283,11 @@ or blocked.
 | `heatGate` | Account-level risk heat (stubbed until sizing is built). | `pass` / `blocked` |
 | `flipflopGate` | After an exit, opposite-side re-entry needs a stronger, persisted signal. | `pass` / `blocked` / `n/a` |
 
+`size_tier` becomes `blocked` if any gate blocks it. It becomes `starter` when no
+gate blocks but at least one gate returns `starter` or `insufficient_history`.
+Otherwise it is `full`. Entries use `size_tier` to decide how aggressively to size;
+HOLD/EXIT/TRIM directives still carry the gate status for observability.
+
 **Gate parameter reference** (all resolve through `cluster_param → global_param → built-in default`):
 
 | Parameter | Gate | Default | Description |
@@ -309,12 +314,6 @@ or blocked.
 | `max_heat_pct` | heatGate | `15` | Account-level heat ceiling as a percent of `account_capital`. |
 | `per_trade_max_risk_pct` | heatGate | `5` | Max risk per trade as a percent of `account_capital` before conviction scaling. |
 | `per_asset_max_notional_pct` | heatGate | `20` | Hard per-asset notional cap as a percent of `account_capital`. |
-| `stop_atr_multiple` | sizing | `2` | Initial stop distance = `entry ± N × ATR`. |
-| `trailing_atr_multiple` | sizing | `2` | Trailing stop distance in the runner / late-trend phase. |
-| `breakeven_trigger_r` | sizing | `1` | Unrealized R at which the oldest unit's stop moves to breakeven. |
-| `partial_trigger_r` | sizing | `1.5` | Unrealized R at which a partial exit is recommended. |
-| `partial_exit_fraction` | sizing | `0.5` | Fraction of the newest unit trimmed at the partial target. |
-| `max_time_stop_days` | sizing | `42` | Max calendar days a position can remain open without reaching its target. |
 
 `trendGate` is a three-tier gate. For a long, price must be above the 20-day and
 50-day MAs (`starter` is not used for longs at the moment; pass/fail only). For a
@@ -323,16 +322,68 @@ If price has extended ≥ `late_trend_ma_distance` percent beyond the 200-day MA
 crowding is ≥ `late_trend_crowding_extreme`, the gate returns `late_trend`, which
 still allows a `starter` tier but warns that the move is stretched.
 
-`size_tier` becomes `blocked` if any gate blocks it. It becomes `starter` when no
-gate blocks but at least one gate returns `starter` or `insufficient_history`.
-Otherwise it is `full`. Entries use `size_tier` to decide how aggressively to size;
-HOLD/EXIT/TRIM directives still carry the gate status for observability.
+## Directive plans
+
+The scoring phase does not place orders, but it produces a `ScorePlan` that tells
+both the agent and the operator what to do about a position. The plan has three
+moving parts: the **directive**, the **size tier**, and sub-plans for **entry**,
+**stop management**, **trimming**, and **sizing**.
+
+### Directives
+
+| Directive | Meaning |
+| --- | --- |
+| `STAND_ASIDE` | No position, no entry. Either no edge or a gate blocked it. |
+| `INITIATE` | Open the first unit of a new trade. |
+| `ADD` | Add another unit to an existing, aligned trade. |
+| `HOLD` | Thesis intact; no action today. |
+| `TRIM` | Reduce the position, usually the newest unit. |
+| `EXIT` | Close the entire position. |
+
+The directive starts from the gates and current position state, then the
+**persistence rule** may downgrade a fresh `EXIT`/`TRIM` or a fresh `INITIATE` if
+there is no actionable new signal. A signal is actionable when the screen notes
+`capitulation` or `divergence`, when `\|catalyst\| ≥ actionable_catalyst_min`, or
+when `\|strength - previous_strength\| ≥ actionable_strength_delta`.
+
+### Regime triggers
+
+`regime_smile` from the screen can trigger extreme-contrarian overrides:
+
+- `regime_trigger_long_max` blocks new longs.
+- `regime_trigger_short_min` blocks new shorts.
+- `regime_force_exit_threshold` forces a full `EXIT` when the regime extreme moves
+  far enough against an open position.
+
+### Unit ceiling
+
+`max_units` caps how many units can be stacked into one trade via `ADD`. When the
+ladder would add but the trade is already at the cap, it stays at `HOLD`.
+
+### Conviction floor
+
+`conv_hold` is the minimum conviction required to keep a position aggressive.
+Below it, an aligned position downgrades to `HOLD` (or `TRIM` if more than one
+unit is on), and adding is not considered.
+
+### Stop/trim sub-plans
+
+When a directive is `INITIATE`, `ADD`, `HOLD`, `TRIM`, or `EXIT`, the plan may
+include a `stop_plan` and/or a `trim_plan`:
+
+- `move_to_breakeven` — lock the oldest unit after a new add or +1R milestone.
+- `trail` / `tighten` — adjust trailing stops; `tighten` is used under late-trend caution.
+- `time_exit` — close the position for a time stop.
+- `decay_exit` — close for signal decay.
+
+The position ladder in the `trade` domain handles the actual stop math. See the
+**Position sizing** section for the ATR-based ladder parameters.
 
 ## Position sizing
 
 Sizing turns a score's `INITIATE` or `ADD` into a concrete, risk-controlled
-position. All sizing parameters resolve through the same
-`cluster_param → global_param → built-in default` chain as the other parameters.
+position. The `sizing_plan` in a score includes the suggested notional, risk
+dollars, stop price, and projected heat after the trade.
 
 | Parameter | Scope | Default | Description |
 | --- | --- | --- | --- |
@@ -389,8 +440,9 @@ for a cluster. An asset with no cluster resolves against `global_param` and the 
 Defaults (`domain/params.ts` is the authority): `beta_factor 1.0`,
 `screen_threshold 1.0`, `w_catalyst 0.25`, `w_sentiment 0.25`, `w_trend 0.3`,
 `w_regime 0.15`, `w_secular 0.05`, `fear_premium 1.25`, `divergence_boost 0.5`,
-`min_history_bars 200`, `max_units 3`, plus the gate and sizing parameters
-documented in the **Scoring gates** and **Position sizing** sections above.
+`min_history_bars 200`, plus all gate, sizing, and directive-plan parameters
+documented in the **Scoring gates**, **Position sizing**, and **Directive plans**
+sections above.
 
 The macro read is session-wide, so it resolves against the global rung only; a cluster
 read resolves against its own cluster first, like everything else.
@@ -399,8 +451,8 @@ read resolves against its own cluster first, like everything else.
 
 All parameters resolve through `cluster_param → global_param → built-in default`.
 Set a global with `janus param set <key> <value>` or a cluster override with
-`janus cluster set-param <key> <param> <value>`. Gate parameters are documented in
-the **Scoring gates** section above; sizing parameters in **Position sizing**.
+`janus cluster set-param <key> <param> <value>`. The sections above describe what
+each parameter does; the table below is a compact reference.
 
 | Parameter | Scope | Default | Description |
 | --- | --- | --- | --- |
@@ -500,10 +552,23 @@ protect first:
 janus trade open BTC --direction long --price 65000 --stop 62000 --risk 500 --notional 5000 --tag core
 ```
 
+Use the score plan's suggested size and ATR-derived stop with `--size auto` and
+`--stop auto` (price is still required because the plan is based on a prior mark):
+
+```
+janus trade open BTC --direction long --price 65000 --size auto --stop auto --tag core
+```
+
 Add a runner unit once the score plan calls `ADD` and the trend gate passes:
 
 ```
 janus trade add-unit 1 --price 68000 --stop 66000 --risk 400 --notional 4000 --tag runner
+```
+
+Or let the plan size and stop the runner:
+
+```
+janus trade add-unit 1 --price 68000 --size auto --stop auto --tag runner
 ```
 
 Move the stop on the oldest unit to breakeven after the plan suggests it, leaving the
@@ -511,6 +576,12 @@ runner's stop wider:
 
 ```
 janus trade set-stop 1 --stop 65000 --unit 1
+```
+
+Trail the runner automatically at the configured ATR multiple:
+
+```
+janus trade set-stop 1 --stop auto
 ```
 
 Trim one unit when the score plan calls `TRIM`; exit the newest unit to keep the core:
