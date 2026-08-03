@@ -999,12 +999,12 @@ import assert from "node:assert/strict";
 import { DEFAULT_PARAMS, resolveParams } from "./params.ts";
 
 test("defaults match the spec", () => {
-  assert.equal(DEFAULT_PARAMS["d_initiate"], 1.0);
+  assert.equal(DEFAULT_PARAMS["strength_initiate"], 1.0);
   assert.equal(DEFAULT_PARAMS["conv_initiate"], 6);
-  assert.equal(DEFAULT_PARAMS["d_add"], 1.0);
+  assert.equal(DEFAULT_PARAMS["strength_add"], 1.0);
   assert.equal(DEFAULT_PARAMS["conv_add"], 7);
   assert.equal(DEFAULT_PARAMS["conv_hold"], 4);
-  assert.equal(DEFAULT_PARAMS["d_exit"], 1.0);
+  assert.equal(DEFAULT_PARAMS["strength_exit"], 1.0);
   assert.equal(DEFAULT_PARAMS["max_units"], 4);
   assert.equal(DEFAULT_PARAMS["screen_flag_threshold"], 1.0);
   assert.equal(DEFAULT_PARAMS["w_catalyst"], 1.0);
@@ -1017,7 +1017,7 @@ test("cluster beats global beats default", () => {
   const r = resolveParams({ conv_add: 9 }, { conv_add: 8, conv_hold: 5 });
   assert.equal(r["conv_add"], 9, "cluster wins");
   assert.equal(r["conv_hold"], 5, "global wins over default");
-  assert.equal(r["d_initiate"], 1.0, "default survives");
+  assert.equal(r["strength_initiate"], 1.0, "default survives");
 });
 
 test("resolveParams passes through params with no default", () => {
@@ -1047,12 +1047,12 @@ Create `src/domain/params.ts`:
  * absent from every layer means that factor is recorded but does not move `d`.
  */
 export const DEFAULT_PARAMS: Record<string, number> = {
-  d_initiate: 1.0,
+  strength_initiate: 1.0,
   conv_initiate: 6,
-  d_add: 1.0,
+  strength_add: 1.0,
   conv_add: 7,
   conv_hold: 4,
-  d_exit: 1.0,
+  strength_exit: 1.0,
   max_units: 4,
   screen_flag_threshold: 1.0,
   w_catalyst: 1.0,
@@ -1244,11 +1244,11 @@ const short = (units: number): PositionState => ({ side: "short", units });
 const call = (d: number, conv: number, pos: PositionState) =>
   deriveDirective(d, conv, pos, DEFAULT_PARAMS);
 
-test("flat: initiates only when both d and conv clear their thresholds", () => {
+test("flat: initiates only when both strength and conv clear their thresholds", () => {
   assert.equal(call(1.5, 8, flat), "INITIATE");
   assert.equal(call(1.0, 6, flat), "INITIATE", "boundary is inclusive");
   assert.equal(call(-1.5, 8, flat), "INITIATE", "short side initiates too");
-  assert.equal(call(0.9, 8, flat), "STAND_ASIDE", "d below d_initiate");
+  assert.equal(call(0.9, 8, flat), "STAND_ASIDE", "strength below strength_initiate");
   assert.equal(call(1.5, 5, flat), "STAND_ASIDE", "conv below conv_initiate");
 });
 
@@ -1256,7 +1256,7 @@ test("open and agreeing: add, hold, or trim by conviction", () => {
   assert.equal(call(1.5, 8, long(2)), "ADD");
   assert.equal(call(1.0, 7, long(2)), "ADD", "boundary is inclusive");
   assert.equal(call(1.5, 8, long(4)), "HOLD", "max_units reached blocks ADD");
-  assert.equal(call(0.5, 8, long(1)), "HOLD", "d below d_add blocks ADD");
+  assert.equal(call(0.5, 8, long(1)), "HOLD", "strength below strength_add blocks ADD");
   assert.equal(call(1.5, 5, long(1)), "HOLD", "conv below conv_add");
   assert.equal(call(1.5, 4, long(1)), "HOLD", "conv_hold boundary is inclusive");
   assert.equal(call(1.5, 3, long(1)), "TRIM", "conv below conv_hold");
@@ -1275,7 +1275,7 @@ test("open and opposed: exit on a strong reversal, trim on a weak one", () => {
   assert.equal(call(0.5, 8, short(2)), "TRIM");
 });
 
-test("d of exactly zero counts as opposing an open position", () => {
+test("strength of exactly zero counts as opposing an open position", () => {
   assert.equal(call(0, 8, long(1)), "TRIM");
 });
 
@@ -1318,15 +1318,15 @@ export function deriveDirective(
   const p = (key: string): number => params[key] ?? 0;
 
   if (pos.side === null) {
-    return Math.abs(d) >= p("d_initiate") && conv >= p("conv_initiate")
+    return Math.abs(d) >= p("strength_initiate") && conv >= p("conv_initiate")
       ? "INITIATE"
       : "STAND_ASIDE";
   }
 
   const agrees = pos.side === "long" ? d > 0 : d < 0;
 
-  if (!agrees) return Math.abs(d) >= p("d_exit") ? "EXIT" : "TRIM";
-  if (conv >= p("conv_add") && Math.abs(d) >= p("d_add") && pos.units < p("max_units")) return "ADD";
+  if (!agrees) return Math.abs(d) >= p("strength_exit") ? "EXIT" : "TRIM";
+  if (conv >= p("conv_add") && Math.abs(d) >= p("strength_add") && pos.units < p("max_units")) return "ADD";
   if (conv >= p("conv_hold")) return "HOLD";
   return "TRIM";
 }

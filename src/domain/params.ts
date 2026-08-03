@@ -9,10 +9,10 @@
  * cannot compute a 200-day MA, which a weeks-to-months swing thesis treats as
  * a hard gap.
  *
- * Directive ladder thresholds are also here. `d_*` are on the same ±2 strength
- * scale as the score; `conv_*` are on the 1..10 conviction scale. Trend gate
- * parameters make the MA structure a hard entry/scaling condition, while
- * regime trigger thresholds keep the extreme-contrarian override configurable.
+ * Directive ladder thresholds are also here. `strength_*` are on the same ±2
+ * strength scale as the score; `conv_*` are on the 1..10 conviction scale.
+ * Trend gate parameters make the MA structure a hard entry/scaling condition,
+ * while regime trigger thresholds keep the extreme-contrarian override configurable.
  */
 export const DEFAULT_PARAMS: Record<string, number> = {
   beta_factor: 1.0,
@@ -28,12 +28,12 @@ export const DEFAULT_PARAMS: Record<string, number> = {
   max_units: 3,
 
   // Directive ladder (strength is -2..2, conviction is 1..10).
-  d_initiate: 1.0,
+  strength_initiate: 1.0,
   conv_initiate: 6,
-  d_add: 1.0,
+  strength_add: 1.0,
   conv_add: 7,
   conv_hold: 4,
-  d_exit: 1.0,
+  strength_exit: 1.0,
 
   // Trend gate as hard condition, not a factor.
   trend_gate_long: 1.0,        // min px_vs_sma50 % to allow long entry/add

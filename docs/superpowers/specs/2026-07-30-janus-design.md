@@ -458,24 +458,24 @@ asset's current position state, and cluster-resolved thresholds.
 
 | Position state | Condition | Directive |
 |---|---|---|
-| flat | `abs(d) >= d_initiate` and `conv >= conv_initiate` | `INITIATE` |
+| flat | `abs(d) >= strength_initiate` and `conv >= conv_initiate` | `INITIATE` |
 | flat | otherwise | `STAND_ASIDE` |
-| open, `d` agrees with direction | `conv >= conv_add` and `abs(d) >= d_add` and `units < max_units` | `ADD` |
+| open, `d` agrees with direction | `conv >= conv_add` and `abs(d) >= strength_add` and `units < max_units` | `ADD` |
 | open, `d` agrees | `conv >= conv_hold` | `HOLD` |
 | open, `d` agrees | otherwise | `TRIM` |
-| open, `d` opposes direction | `abs(d) >= d_exit` | `EXIT` |
+| open, `d` opposes direction | `abs(d) >= strength_exit` | `EXIT` |
 | open, `d` opposes | otherwise | `TRIM` |
 
 Defaults, all overridable per cluster:
 
 | Param | Default |
 |---|---|
-| `d_initiate` | 1.0 |
+| `strength_initiate` | 1.0 |
 | `conv_initiate` | 6 |
-| `d_add` | 1.0 |
+| `strength_add` | 1.0 |
 | `conv_add` | 7 |
 | `conv_hold` | 4 |
-| `d_exit` | 1.0 |
+| `strength_exit` | 1.0 |
 | `max_units` | 4 |
 | `screen_flag_threshold` | 1.0 |
 | `w_catalyst` | 1.0 |

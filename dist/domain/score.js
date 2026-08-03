@@ -67,7 +67,7 @@ export function deriveScore(metrics, context, params) {
     const wSecular = params["w_secular"] ?? WEIGHT_FALLBACK;
     // Weighted mean, normalised by total |weight| so a retune rescales the
     // score's sensitivity rather than its absolute magnitude, keeping every
-    // downstream threshold (screen_threshold, d_initiate...) comparable.
+    // downstream threshold (screen_threshold, strength_initiate...) comparable.
     const contributions = [
         { key: "catalyst", weight: wCat, value: catalyst },
         { key: "sentiment", weight: wSent, value: sentiment },
@@ -195,12 +195,12 @@ function sentimentFromCrowding(P, trend, capitulation, divergence, fearPremium, 
  * - Persistence rule resists flip-flopping unless there is an actionable new signal.
  */
 function derivePlan(strength, conviction, position, coverage, regimeSmile, catalyst, divergence, capitulation, previousScore, params) {
-    const dInitiate = params["d_initiate"] ?? 1.0;
+    const strengthInitiate = params["strength_initiate"] ?? 1.0;
     const convInitiate = params["conv_initiate"] ?? 6;
-    const dAdd = params["d_add"] ?? 1.0;
+    const strengthAdd = params["strength_add"] ?? 1.0;
     const convAdd = params["conv_add"] ?? 7;
     const convHold = params["conv_hold"] ?? 4;
-    const dExit = params["d_exit"] ?? 1.0;
+    const strengthExit = params["strength_exit"] ?? 1.0;
     const maxUnits = params["max_units"] ?? 3;
     const side = strength > 0 ? "long" : strength < 0 ? "short" : null;
     const absStrength = Math.abs(strength);
@@ -234,7 +234,7 @@ function derivePlan(strength, conviction, position, coverage, regimeSmile, catal
                 regime_trigger: regimeTrigger,
             };
         }
-        else if (absStrength < dInitiate || conviction < convInitiate) {
+        else if (absStrength < strengthInitiate || conviction < convInitiate) {
             plan = {
                 directive: "STAND_ASIDE",
                 reason: `strength ${strength.toFixed(2)}/conviction ${conviction} below initiate thresholds`,
@@ -274,7 +274,7 @@ function derivePlan(strength, conviction, position, coverage, regimeSmile, catal
                 stop_plan: { action: "hold", affected_units: "all", rationale: "exit entire position" },
             };
         }
-        else if (misaligned && disagreement >= dExit && conviction >= convHold) {
+        else if (misaligned && disagreement >= strengthExit && conviction >= convHold) {
             plan = {
                 directive: "EXIT",
                 reason: `score flipped against ${posSide} by ${disagreement.toFixed(2)} with conviction ${conviction}`,
@@ -296,7 +296,7 @@ function derivePlan(strength, conviction, position, coverage, regimeSmile, catal
                     : undefined,
             };
         }
-        else if (aligned && absStrength >= dAdd && conviction >= convAdd && trendOk && posUnits < maxUnits && isWorking) {
+        else if (aligned && absStrength >= strengthAdd && conviction >= convAdd && trendOk && posUnits < maxUnits && isWorking) {
             plan = {
                 directive: "ADD",
                 reason: `position working, strength ${strength.toFixed(2)} conviction ${conviction} allow add`,

@@ -283,8 +283,8 @@ Defaults (`domain/params.ts` is the authority): `beta_factor 1.0`,
 `w_regime 0.15`, `w_secular 0.05`, `fear_premium 1.25`, `divergence_boost 0.5`,
 `min_history_bars 200`, `max_units 3`.
 
-Directive ladder thresholds are active: `d_initiate 1.0`, `conv_initiate 6`,
-`d_add 1.0`, `conv_add 7`, `conv_hold 4`, `d_exit 1.0`. Trend/MA structure is a
+Directive ladder thresholds are active: `strength_initiate 1.0`, `conv_initiate 6`,
+`strength_add 1.0`, `conv_add 7`, `conv_hold 4`, `strength_exit 1.0`. Trend/MA structure is a
 hard entry/scaling gate via `trend_gate_long 1.0`, `trend_gate_short -1.0`,
 `require_golden_for_long 1`, `require_death_for_short 1`. Regime is context plus
 an extreme-contrarian trigger: `regime_trigger_long_max 1.5`,
@@ -306,13 +306,52 @@ still executes every change manually via the `trade` commands.
 
 | Parameter | Guards |
 | --- | --- |
-| `d_initiate`, `conv_initiate` | Flat + trend gate pass → `INITIATE` |
-| `d_add`, `conv_add` | Holding + working + trend gate pass → `ADD` |
+| `strength_initiate`, `conv_initiate` | Flat + trend gate pass → `INITIATE` |
+| `strength_add`, `conv_add` | Holding + working + trend gate pass → `ADD` |
 | `conv_hold` | The conviction floor; below it, `TRIM` or `HOLD` |
-| `d_exit` | How hard the score must argue against an open position to become `EXIT` |
+| `strength_exit` | How hard the score must argue against an open position to become `EXIT` |
 | `max_units` | The ceiling on stacked adds |
 
-The `d_*` names predate `strength`; they mean the same number.
+
+
+### Parameter reference
+
+All parameters resolve through `cluster_param → global_param → built-in default`.
+Set a global with `janus param set <key> <value>` or a cluster override with
+`janus cluster set-param <key> <param> <value>`.
+
+| Parameter | Phase | Default | Description |
+| --- | --- | --- | --- |
+| `beta_factor` | screen | `1.0` | Multiplier applied to the raw screen score before the threshold check. |
+| `screen_threshold` | screen | `1.0` | Minimum `screen_score` for an asset to be flagged for the scoring queue. |
+| `w_catalyst` | score | `0.25` | Weight of the momentum/catalyst factor in `strength`. |
+| `w_sentiment` | score | `0.25` | Weight of the contrarian positioning/crowding factor in `strength`. |
+| `w_trend` | score | `0.30` | Weight of the trend/flow factor in `strength`. |
+| `w_regime` | score | `0.15` | Weight of the session's `regime_smile` in `strength`. |
+| `w_secular` | score | `0.05` | Weight of the longer-horizon thesis factor in `strength`. |
+| `fear_premium` | score | `1.25` | Scales the bullish side of the contrarian sentiment fade; >1 makes panic bounces fade harder than greed tops. |
+| `divergence_boost` | score | `0.5` | Widens a contrarian fade when a price/crowding divergence is present. |
+| `min_history_bars` | asset | `200` | Minimum listed bars for an asset to be added to the roster; below this a 200-day MA is impossible. |
+| `max_units` | directive | `3` | Ceiling on how many units can be stacked into one trade via `ADD`. |
+| `strength_initiate` | directive | `1.0` | Minimum `\|strength\|` for a flat asset to receive `INITIATE`. |
+| `conv_initiate` | directive | `6` | Minimum `conviction` for a flat asset to receive `INITIATE`. |
+| `strength_add` | directive | `1.0` | Minimum `\|strength\|` for a working hold to receive `ADD`. |
+| `conv_add` | directive | `7` | Minimum `conviction` for a working hold to receive `ADD`. |
+| `conv_hold` | directive | `4` | Conviction floor for staying put; below it the ladder downgrades to `TRIM` or `HOLD`. |
+| `strength_exit` | directive | `1.0` | Minimum `\|strength\|` against an open position to trigger `EXIT` instead of `TRIM`. |
+| `trend_gate_long` | directive | `1.0` | Minimum `px_vs_sma50` percent for long `INITIATE`/`ADD` to pass the trend gate. |
+| `trend_gate_short` | directive | `-1.0` | Maximum `px_vs_sma50` percent for short `INITIATE`/`ADD` to pass the trend gate. |
+| `require_golden_for_long` | directive | `1` | When `1`, long entries are blocked if `cross_50_200` is `death`. |
+| `require_death_for_short` | directive | `1` | When `1`, short entries are blocked if `cross_50_200` is `golden`. |
+| `regime_trigger_long_max` | directive | `1.5` | Block new longs and force long exits when `regime_smile` reaches this positive extreme. |
+| `regime_trigger_short_min` | directive | `-1.5` | Block new shorts and force short exits when `regime_smile` reaches this negative extreme. |
+| `regime_force_exit_threshold` | directive | `1.8` | Force a full `EXIT` when `regime_smile` exceeds this against an open position. |
+| `flip_flop_lookback_days` | directive | `5` | How many days back the persistence rule checks for a prior score. |
+| `actionable_catalyst_min` | directive | `1.5` | Minimum `\|catalyst\|` that counts as an actionable new signal for the persistence rule. |
+| `actionable_strength_delta` | directive | `2.5` | Minimum change in `\|strength\|` from the prior score that counts as actionable. |
+
+Boolean parameters (`require_golden_for_long`, `require_death_for_short`) use
+`1` for true and `0` for false.
 
 ## Commands
 
