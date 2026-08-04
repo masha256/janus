@@ -33,15 +33,17 @@ export const DEFAULT_PARAMS: Record<string, number> = {
   signal_strength_exit: 1.0,
 
   // persistenceGate — how many run-days the signalGate must have passed.
-  signal_persist_days: 1,
+  signal_persist_days: 2,
 
-  // trendGate — MA cushions and late-trend caution thresholds.
-  trend_sma20_cushion_long: 0,
-  trend_sma20_cushion_short: 0,
-  trend_sma50_cushion_long: 1.0,
-  trend_sma50_cushion_short: -1.0,
-  require_golden_for_long: 1,
-  require_death_for_short: 1,
+  // trendGate — explicit 20/50 MA band thresholds and late-trend caution.
+  // Long: px_vs_sma20 > t20_long and px_vs_sma50 < t50_long -> starter;
+  //       px_vs_sma20 > t20_long and px_vs_sma50 >= t50_long -> pass.
+  // Short: px_vs_sma20 < t20_short and px_vs_sma50 > t50_short -> starter;
+  //        px_vs_sma20 < t20_short and px_vs_sma50 <= t50_short -> pass.
+  trend_sma20_threshold_long: 0,
+  trend_sma50_threshold_long: 0,
+  trend_sma20_threshold_short: 0,
+  trend_sma50_threshold_short: 0,
   late_trend_ma_distance: 20,
   late_trend_crowding_extreme: 85,
 
@@ -58,6 +60,10 @@ export const DEFAULT_PARAMS: Record<string, number> = {
   max_heat_pct: 15,
   per_trade_max_risk_pct: 5,
   per_asset_max_notional_pct: 20,
+
+  // Position sizing.
+  // starter_size_fraction scales risk/notional when the trend gate returns starter.
+  starter_size_fraction: 0.5,
 
   // stop-ladder defaults.
   stop_atr_multiple: 2,

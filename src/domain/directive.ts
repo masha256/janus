@@ -38,7 +38,7 @@ export type ScorePlan = {
 
   /** Individual gate results for observability. */
   signal_gate: "pass" | "fail";
-  persistence_gate: "pass" | "fail" | "insufficient_history";
+  persistence_gate: "pass" | "fail";
   trend_gate: "pass" | "starter" | "fail" | "late_trend";
   binary_gate: "pass" | "blocked";
   heat_gate: "pass" | "blocked";
@@ -166,7 +166,7 @@ export function scorePlanFromResults(results: Record<string, unknown>): ScorePla
     reason: String(results["directive_reason"] ?? ""),
     size_tier,
     signal_gate: (results["signal_gate"] as ScorePlan["signal_gate"]) ?? "fail",
-    persistence_gate: (results["persistence_gate"] as ScorePlan["persistence_gate"]) ?? "insufficient_history",
+    persistence_gate: (results["persistence_gate"] as ScorePlan["persistence_gate"]) ?? "fail",
     trend_gate: (results["trend_gate"] as ScorePlan["trend_gate"]) ?? "fail",
     binary_gate: (results["binary_gate"] as ScorePlan["binary_gate"]) ?? "pass",
     heat_gate: (results["heat_gate"] as ScorePlan["heat_gate"]) ?? "pass",

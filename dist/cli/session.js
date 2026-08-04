@@ -1,7 +1,7 @@
 import { Command } from "commander";
-import { getSession, listSessions } from "../db/repo/session.js";
+import { ensureSession, getSession, listSessions } from "../db/repo/session.js";
 import { eligibleAssets } from "../db/repo/asset.js";
-import { nextPhase, todayNY, PHASES } from "../domain/session.js";
+import { nextPhase, todayNY, PHASES, nowIso } from "../domain/session.js";
 import { unknownVerb } from "./args.js";
 import { handler, withDb } from "./command.js";
 import { JanusError } from "../output.js";
@@ -17,7 +17,25 @@ export function build(emit) {
         .description("Recent sessions, most recent first")
         .option("--limit <N>", "how many to return (default 20)")
         .action(async (opts) => emit(await list(opts.limit)));
+    cmd.command("open")
+        .description("Create a session for a past date (for backfill/testing only)")
+        .option("--date <YYYY-MM-DD>", "date to open; required")
+        .action(async (opts) => emit(await openSession(opts.date)));
     return cmd;
+}
+function openSession(date) {
+    if (date === undefined) {
+        throw new JanusError("VALIDATION", "--date is required for session open");
+    }
+    return withDb((db) => {
+        const now = nowIso();
+        const existing = getSession(db, date);
+        if (existing !== undefined) {
+            throw new JanusError("VALIDATION", `session ${date} already exists`);
+        }
+        const session = ensureSession(db, date, now);
+        return { session_date: session.session_date, opened_at: now };
+    });
 }
 function status(date = todayNY()) {
     return withDb((db) => {

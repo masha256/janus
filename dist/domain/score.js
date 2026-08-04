@@ -1,6 +1,6 @@
 import { JanusError } from "../output.js";
 import { num, requireNum } from "./metrics.js";
-import { actionableNewSignal, regimeTriggerState, runGates } from "./gates.js";
+import { actionableNewSignal, heatGate, regimeTriggerState, runGates } from "./gates.js";
 import { sizeFromRiskAndStop, stopDistancePct, stopFromAtr } from "./sizing.js";
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 const boolParam = (params, key) => (params[key] ?? 0) !== 0;
@@ -206,7 +206,7 @@ function derivePlan(strength, conviction, position, context, catalyst, params) {
     const absStrength = Math.abs(strength);
     const regimeSmile = requireNum(context.screen.results, "regime_smile", -2, 2);
     // Evaluate every gate so the plan can report why it was allowed or blocked.
-    const { signal, persistence, trend, binary, heat, flipflop } = runGates(strength, conviction, position, context.screen.metrics, {
+    const { signal, persistence, trend, binary, heat: initialHeat, flipflop } = runGates(strength, conviction, position, context.screen.metrics, {
         params,
         sessionDate: context.session_date,
         coverage: context.asset.coverage,
@@ -214,11 +214,15 @@ function derivePlan(strength, conviction, position, context, catalyst, params) {
         lastExit: context.last_exit ?? null,
         recentScores: context.recent_scores ?? [],
         currentHeat: context.current_heat ?? 0,
-        proposedHeat: buildProposedHeat(position, side, context, params),
+        proposedHeat: 0,
     });
-    const blocked = signal === "fail" || persistence === "fail" || trend === "fail" || binary === "blocked" || heat === "blocked" || flipflop === "blocked";
-    const starter = !blocked && (trend === "starter" || persistence === "insufficient_history");
+    const blocked = signal === "fail" || persistence === "fail" || trend === "fail" || binary === "blocked" || initialHeat === "blocked" || flipflop === "blocked";
+    const starter = !blocked && trend === "starter";
     const sizeTier = blocked ? "blocked" : starter ? "starter" : "full";
+    // Compute proposed heat now that the tier is known (starter scales the sizing plan),
+    // then re-evaluate heatGate so it sees the scaled risk.
+    const proposedHeat = buildProposedHeat(position, side, context, params, sizeTier);
+    const heat = heatGate(params, context.current_heat ?? 0, proposedHeat);
     // Regime extreme-contrarian trigger.
     const regimeTrigger = regimeTriggerState(regimeSmile, params);
     const regimeBlocksSide = (s) => (s === "long" && regimeTrigger === "extreme_bull") ||
@@ -291,7 +295,7 @@ function derivePlan(strength, conviction, position, context, catalyst, params) {
             };
         }
         else {
-            sizingPlan = buildSizingPlan(side, context, params);
+            sizingPlan = buildSizingPlan(side, context, params, sizeTier);
             plan = {
                 directive: "INITIATE",
                 reason: `strength ${strength.toFixed(2)} conviction ${conviction} + gates pass${sizeTier === "starter" ? " (starter tier)" : ""}`,
@@ -365,7 +369,7 @@ function derivePlan(strength, conviction, position, context, catalyst, params) {
             };
         }
         else if (aligned && sizeTier !== "blocked" && posUnits < maxUnits && isWorking) {
-            sizingPlan = buildSizingPlan(posSide, context, params);
+            sizingPlan = buildSizingPlan(posSide, context, params, sizeTier);
             plan = {
                 directive: "ADD",
                 reason: `position working, strength ${strength.toFixed(2)} conviction ${conviction} allow add${sizeTier === "starter" ? " (starter tier)" : ""}`,
@@ -446,15 +450,15 @@ function derivePlan(strength, conviction, position, context, catalyst, params) {
     }
     return { plan, sizingPlan };
 }
-function buildProposedHeat(position, side, context, params) {
+function buildProposedHeat(position, side, context, params, sizeTier) {
     if (position.side !== null)
         return 0; // existing position adds no new heat in this decision
     if (side === null)
         return 0;
-    const sizing = buildSizingPlan(side, context, params);
+    const sizing = buildSizingPlan(side, context, params, sizeTier);
     return sizing?.risk_dollars ?? 0;
 }
-function buildSizingPlan(side, context, params) {
+function buildSizingPlan(side, context, params, sizeTier) {
     const capital = params["account_capital"] ?? 0;
     const coverage = context.asset.coverage;
     if (capital <= 0 || coverage === null)
@@ -469,9 +473,13 @@ function buildSizingPlan(side, context, params) {
     const distPct = stopDistancePct(entry, stop, side);
     if (distPct <= 0)
         return undefined;
+    const starterFraction = sizeTier === "starter"
+        ? Math.max(0.01, Math.min(1, params["starter_size_fraction"] ?? 0.5))
+        : 1;
+    const maxRiskPct = (params["per_trade_max_risk_pct"] ?? 5) * starterFraction;
     const result = sizeFromRiskAndStop({
         capital,
-        maxRiskPct: params["per_trade_max_risk_pct"] ?? 5,
+        maxRiskPct,
         conviction: context.previous_score?.conviction ?? params["signal_conviction_initiate"] ?? 6,
         stopDistancePct: distPct,
         perAssetMaxNotionalPct: params["per_asset_max_notional_pct"] ?? 20,

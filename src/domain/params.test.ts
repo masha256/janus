@@ -14,6 +14,15 @@ test("defaults match the spec", () => {
   assert.equal(DEFAULT_PARAMS["divergence_boost"], 0.5);
   assert.equal(DEFAULT_PARAMS["min_history_bars"], 200);
   assert.equal(DEFAULT_PARAMS["max_units"], 3);
+
+  assert.equal(DEFAULT_PARAMS["trend_sma20_threshold_long"], 0);
+  assert.equal(DEFAULT_PARAMS["trend_sma50_threshold_long"], 0);
+  assert.equal(DEFAULT_PARAMS["trend_sma20_threshold_short"], 0);
+  assert.equal(DEFAULT_PARAMS["trend_sma50_threshold_short"], 0);
+  assert.equal(DEFAULT_PARAMS["late_trend_ma_distance"], 20);
+  assert.equal(DEFAULT_PARAMS["late_trend_crowding_extreme"], 85);
+  assert.equal(DEFAULT_PARAMS["starter_size_fraction"], 0.5);
+
   assert.equal(DEFAULT_PARAMS["account_capital"], 100000);
   assert.equal(DEFAULT_PARAMS["max_heat_pct"], 15);
   assert.equal(DEFAULT_PARAMS["per_trade_max_risk_pct"], 5);

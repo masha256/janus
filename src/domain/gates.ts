@@ -44,12 +44,11 @@ export function persistenceGate(
   recentScores: ScoreResult[],
   params: Record<string, number>,
 ): ScorePlan["persistence_gate"] {
-  const required = Math.max(1, Math.round(params["signal_persist_days"] ?? 1));
+  const required = Math.max(1, Math.round(params["signal_persist_days"] ?? 2));
   if (recentScores.length < required - 1) {
-    // Need at least N-1 prior scores plus today. For N=1 no prior scores needed.
-    return required === 1 ? "pass" : "insufficient_history";
+    // Need at least N-1 prior scores plus today; without them the signal has not persisted.
+    return "fail";
   }
-
 
   const strengthInitiate = params["signal_strength_initiate"] ?? 1.0;
   const convInitiate = params["signal_conviction_initiate"] ?? 6;
@@ -82,32 +81,24 @@ export function trendGate(
   const pxVs20 = coverage.px_vs_sma20;
   const pxVs50 = coverage.px_vs_sma50;
   const pxVs200 = coverage.px_vs_sma200;
-  const cross50_200 = coverage.cross_50_200;
-  const crossPx50 = coverage.cross_px_50;
 
-  const c20Long = params["trend_sma20_cushion_long"] ?? 0;
-  const c20Short = params["trend_sma20_cushion_short"] ?? 0;
-  const c50Long = params["trend_sma50_cushion_long"] ?? 1.0;
-  const c50Short = params["trend_sma50_cushion_short"] ?? -1.0;
-  const requireGolden = boolParam(params, "require_golden_for_long");
-  const requireDeath = boolParam(params, "require_death_for_short");
+  const t20Long = params["trend_sma20_threshold_long"] ?? 0;
+  const t50Long = params["trend_sma50_threshold_long"] ?? 0;
+  const t20Short = params["trend_sma20_threshold_short"] ?? 0;
+  const t50Short = params["trend_sma50_threshold_short"] ?? 0;
   const lateDist = params["late_trend_ma_distance"] ?? 20;
   const lateCrowd = params["late_trend_crowding_extreme"] ?? 85;
 
   if (side === "long") {
-    if (crossPx50 !== "above") return "fail";
-    if (requireGolden && cross50_200 === "death") return "fail";
-    if (pxVs50 === null || pxVs50 < c50Long) return "fail";
-    if (pxVs20 === null || pxVs20 < c20Long) return "fail";
+    if (pxVs20 === null || pxVs20 <= t20Long) return "fail";
+    if (pxVs50 === null || pxVs50 < t50Long) return "starter";
     const extended = pxVs200 !== null && pxVs200 >= lateDist && crowding >= lateCrowd;
     return extended ? "late_trend" : "pass";
   }
 
   if (side === "short") {
-    if (crossPx50 !== "below") return "fail";
-    if (requireDeath && cross50_200 === "golden") return "fail";
-    if (pxVs50 === null || pxVs50 > c50Short) return "fail";
-    if (pxVs20 === null || pxVs20 > c20Short) return "fail";
+    if (pxVs20 === null || pxVs20 >= t20Short) return "fail";
+    if (pxVs50 === null || pxVs50 > t50Short) return "starter";
     const extended = pxVs200 !== null && pxVs200 <= -lateDist && crowding >= lateCrowd;
     return extended ? "late_trend" : "pass";
   }

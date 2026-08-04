@@ -224,7 +224,7 @@ function scorePlanFromResultsStatic(
     reason: String(results["directive_reason"] ?? ""),
     size_tier,
     signal_gate: (results["signal_gate"] as import("../../domain/directive.ts").ScorePlan["signal_gate"]) ?? "fail",
-    persistence_gate: (results["persistence_gate"] as import("../../domain/directive.ts").ScorePlan["persistence_gate"]) ?? "insufficient_history",
+    persistence_gate: (results["persistence_gate"] as import("../../domain/directive.ts").ScorePlan["persistence_gate"]) ?? "fail",
     trend_gate: (results["trend_gate"] as import("../../domain/directive.ts").ScorePlan["trend_gate"]) ?? "fail",
     binary_gate: (results["binary_gate"] as import("../../domain/directive.ts").ScorePlan["binary_gate"]) ?? "pass",
     heat_gate: (results["heat_gate"] as import("../../domain/directive.ts").ScorePlan["heat_gate"]) ?? "pass",

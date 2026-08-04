@@ -42,15 +42,14 @@ Sizing defaults (`account_capital=100000`, `max_heat_pct=15`,
 into the code; only override them here if you want different values.
 
 ```bash
-janus param set trend_sma50_cushion_long 0
-janus param set require_golden_for_long 0
+janus param set trend_sma20_threshold_long -2
+janus param set trend_sma50_threshold_long -2
 janus coverage run
 ```
 
-`require_golden_for_long 0` removes the 50/200 golden-cross requirement, and
-`trend_sma50_cushion_long 0` only requires price to be at or above the 50-day SMA. This
-keeps the trend gate meaningful while letting the recipe produce trade directives
-reliably.
+Setting both long thresholds to `-2` lets price sit below the 20- and 50-day SMAs
+by up to 2% and still pass the trend gate. This keeps the gate meaningful while
+letting the recipe produce trade directives reliably with arbitrary snapshots.
 
 If an asset is skipped because of too little history, the recipe still works for
 the assets that were covered.
@@ -75,7 +74,41 @@ janus screen record ETH --metric score=5 --metric confidence=1
 janus screen record UNI --metric score=5 --metric confidence=1
 ```
 
-## 6. Score BTC and ETH with bullish factors that pass the trend gate
+## 6. Record yesterday's scores so persistence passes today
+
+`signal_persist_days` defaults to `2`, so today's signal needs yesterday's score
+to have passed the same threshold. Score all three assets for yesterday with the
+same bullish factors; the test does not need sizing plans, just persisted score
+rows.
+
+`--date` addresses an existing session, so first create yesterday's session by
+running coverage for that date, then record the reads and scores.
+
+```bash
+YESTERDAY=$(date -v-1d +%Y-%m-%d 2>/dev/null || date -d yesterday +%Y-%m-%d 2>/dev/null || date +%Y-%m-%d -d "1 day ago" 2>/dev/null)
+
+janus session open --date $YESTERDAY
+janus coverage run --date $YESTERDAY
+janus macro record --date $YESTERDAY --summary "breadth improving, regime neutral" --metric regime=0.5
+janus cluster record --date $YESTERDAY crypto_bluechip --metric regime=0.5
+janus cluster record --date $YESTERDAY crypto_defi      --metric regime=0.5
+
+janus screen record --date $YESTERDAY BTC --metric score=5 --metric confidence=1
+janus screen record --date $YESTERDAY ETH --metric score=5 --metric confidence=1
+janus screen record --date $YESTERDAY UNI --metric score=5 --metric confidence=1
+
+janus score record --date $YESTERDAY BTC \
+  --factor catalyst=2 --factor trend=2 --factor secular=1 \
+  --factor crowding=50 --factor divergence=0 --factor confidence=1
+janus score record --date $YESTERDAY ETH \
+  --factor catalyst=2 --factor trend=2 --factor secular=1 \
+  --factor crowding=50 --factor divergence=0 --factor confidence=1
+janus score record --date $YESTERDAY UNI \
+  --factor catalyst=2 --factor trend=2 --factor secular=1 \
+  --factor crowding=50 --factor divergence=0 --factor confidence=1
+```
+
+## 7. Score BTC and ETH with bullish factors that pass the trend gate
 
 The exact directive depends on the coverage data. With a bullish coverage
 snapshot (price above SMA 50/200), the factors below should produce
@@ -106,7 +139,7 @@ janus score show BTC
 janus score show ETH
 ```
 
-## 7. Expected result
+## 8. Expected result
 
 For both `BTC` and `ETH` you should see:
 
@@ -132,7 +165,7 @@ The score plan also includes a sizing plan based on the declared capital, ATR,
 and conviction. Look for `plan.sizing_plan` with suggested notional, risk dollars,
 stop price, and projected heat after the trade.
 
-## 8. Open the recommended trades
+## 9. Open the recommended trades
 
 Manual override (explicit everything):
 
@@ -163,7 +196,7 @@ janus trade list --open
 janus trade show 1
 ```
 
-## 9. Inspect heat and stop-ladder state
+## 10. Inspect heat and stop-ladder state
 
 ```bash
 janus trade show 1
@@ -178,7 +211,7 @@ A unit whose stop has moved to breakeven contributes zero heat, freeing
 capacity for new positions. The heat gate uses this when scoring an `INITIATE`
 or `ADD` directive.
 
-## 10. Clean up
+## 11. Clean up
 
 ```bash
 rm -f $JANUS_DB

@@ -277,14 +277,14 @@ or blocked.
 | Gate | Purpose | Result values |
 | --- | --- | --- |
 | `signalGate` | Strength/conviction thresholds for initiate, add, and exit. | `pass` / `fail` |
-| `persistenceGate` | Signal must persist for `signal_persist_days` run-days. | `pass` / `fail` / `insufficient_history` |
+| `persistenceGate` | Signal must persist for `signal_persist_days` run-days. | `pass` / `fail` |
 | `trendGate` | Price/MA structure for the proposed direction. | `pass` / `starter` / `fail` / `late_trend` |
 | `binaryGate` | Blocks entry around a known binary event recorded on the screen. | `pass` / `blocked` |
 | `heatGate` | Account-level risk heat (stubbed until sizing is built). | `pass` / `blocked` |
 | `flipflopGate` | After an exit, opposite-side re-entry needs a stronger, persisted signal. | `pass` / `blocked` / `n/a` |
 
 `size_tier` becomes `blocked` if any gate blocks it. It becomes `starter` when no
-gate blocks but at least one gate returns `starter` or `insufficient_history`.
+gate blocks but at least one gate returns `starter`.
 Otherwise it is `full`. Entries use `size_tier` to decide how aggressively to size;
 HOLD/EXIT/TRIM directives still carry the gate status for observability.
 
@@ -297,13 +297,11 @@ HOLD/EXIT/TRIM directives still carry the gate status for observability.
 | `signal_strength_add` | signalGate | `1.0` | Minimum `\|strength\|` for an aligned position to pass the signal gate for adding. |
 | `signal_conviction_add` | signalGate | `7` | Minimum `conviction` for an aligned position to pass the signal gate for adding. |
 | `signal_strength_exit` | signalGate | `1.0` | Minimum `\|strength\|` against an open position to pass the signal gate for exit. |
-| `signal_persist_days` | persistenceGate | `1` | Run-days the signal gate must have passed, including today. |
-| `trend_sma20_cushion_long` | trendGate | `0` | Minimum `px_vs_sma20` percent for long entry/add to pass. |
-| `trend_sma20_cushion_short` | trendGate | `0` | Maximum `px_vs_sma20` percent for short entry/add to pass. |
-| `trend_sma50_cushion_long` | trendGate | `1.0` | Minimum `px_vs_sma50` percent for long entry/add to pass. |
-| `trend_sma50_cushion_short` | trendGate | `-1.0` | Maximum `px_vs_sma50` percent for short entry/add to pass. |
-| `require_golden_for_long` | trendGate | `1` | When `1`, long entries are blocked if `cross_50_200` is `death`. |
-| `require_death_for_short` | trendGate | `1` | When `1`, short entries are blocked if `cross_50_200` is `golden`. |
+| `signal_persist_days` | persistenceGate | `2` | Run-days the signal gate must have passed, including today. |
+| `trend_sma20_threshold_long` | trendGate | `0` | Long `px_vs_sma20` must be > threshold to be starter or pass. |
+| `trend_sma50_threshold_long` | trendGate | `0` | Long `px_vs_sma50` must be >= threshold to be pass (below is starter). |
+| `trend_sma20_threshold_short` | trendGate | `0` | Short `px_vs_sma20` must be < threshold to be starter or pass. |
+| `trend_sma50_threshold_short` | trendGate | `0` | Short `px_vs_sma50` must be <= threshold to be pass (above is starter). |
 | `late_trend_ma_distance` | trendGate | `20` | Distance beyond the 200-day MA that, with extreme crowding, marks a move as `late_trend`. |
 | `late_trend_crowding_extreme` | trendGate | `85` | Crowding level that, with a stretched 200-day MA distance, marks a move as `late_trend`. |
 | `binary_cooldown_days` | binaryGate | `14` | Days after a recorded binary event during which entry is blocked. |
@@ -315,12 +313,21 @@ HOLD/EXIT/TRIM directives still carry the gate status for observability.
 | `per_trade_max_risk_pct` | heatGate | `5` | Max risk per trade as a percent of `account_capital` before conviction scaling. |
 | `per_asset_max_notional_pct` | heatGate | `20` | Hard per-asset notional cap as a percent of `account_capital`. |
 
-`trendGate` is a three-tier gate. For a long, price must be above the 20-day and
-50-day MAs (`starter` is not used for longs at the moment; pass/fail only). For a
-short, price below both 20-day and 50-day MAs is `pass`; between the two is `starter`.
-If price has extended ≥ `late_trend_ma_distance` percent beyond the 200-day MA and
-crowding is ≥ `late_trend_crowding_extreme`, the gate returns `late_trend`, which
-still allows a `starter` tier but warns that the move is stretched.
+`trendGate` is a three-tier gate driven only by price vs the 20-day and 50-day MAs:
+
+| Side | `px_vs_sma20` | `px_vs_sma50` | Result |
+| --- | --- | --- | --- |
+| Long | <= threshold | any | `fail` |
+| Long | > threshold | < threshold | `starter` |
+| Long | > threshold | >= threshold | `pass` (or `late_trend` if stretched vs 200-day + crowded) |
+| Short | >= threshold | any | `fail` |
+| Short | < threshold | > threshold | `starter` |
+| Short | < threshold | <= threshold | `pass` (or `late_trend` if stretched vs 200-day + crowded) |
+
+`starter` reduces the entry to a smaller size tier; downstream sizing may later scale
+the notional. `late_trend` still allows a starter entry but warns the position is
+stretched and the ladder should tighten/partial early. The 50/200 cross checks that
+were previously used are no longer part of the trend gate.
 
 ## Directive plans
 
@@ -391,6 +398,7 @@ dollars, stop price, and projected heat after the trade.
 | `max_heat_pct` | sizing | `15` | Max total open risk across the whole book as a percent of `account_capital`. |
 | `per_trade_max_risk_pct` | sizing | `5` | Max risk for one trade as a percent of `account_capital`, before conviction scaling. |
 | `per_asset_max_notional_pct` | sizing | `20` | Hard per-asset notional cap as a percent of `account_capital`. |
+| `starter_size_fraction` | sizing | `0.5` | Multiplier applied to risk and notional when the trend gate returns `starter`. |
 | `stop_atr_multiple` | sizing | `2` | Initial stop distance = `entry ± N × ATR`. |
 | `trailing_atr_multiple` | sizing | `2` | Trailing stop distance in the runner / late-trend phase. |
 | `breakeven_trigger_r` | sizing | `1` | Unrealized R at which the oldest unit's stop moves to breakeven. |
@@ -409,6 +417,10 @@ Heat $   = Risk $  (for pre-breakeven units; breakeven or better stops contribut
 The final suggested notional is the smaller of the risk-derived size and the
 `per_asset_max_notional_pct` cap. `heatGate` blocks new entries/adds when
 `current_heat + proposed_heat > max_heat_pct` of capital.
+
+When the trend gate returns `starter`, `starter_size_fraction` scales both the
+risk dollars and the resulting notional. A `late_trend` result is treated as
+`starter` for sizing purposes.
 
 ### Trade ladder
 
@@ -474,8 +486,7 @@ each parameter does; the table below is a compact reference.
 | `actionable_catalyst_min` | directive | `1.5` | Minimum `\|catalyst\|` that counts as an actionable new signal for the persistence rule. |
 | `actionable_strength_delta` | directive | `1.5` | Minimum change in `\|strength\|` from the prior score that counts as actionable. |
 
-Boolean parameters (`require_golden_for_long`, `require_death_for_short`) use
-`1` for true and `0` for false.
+Boolean parameters use `1` for true and `0` for false.
 
 ## Commands
 
@@ -512,6 +523,7 @@ janus asset rm <symbol>                             refused once the asset has t
 
 janus session status [--date D]
 janus session list [--limit N]
+janus session open --date D                            backfill/testing only
 
 janus macro record --summary - --metric k=v [--metric k=v ...]
 janus macro reads [--date D]

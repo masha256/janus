@@ -45,6 +45,10 @@ re-running or correcting a previous day; it will not create a new session.
 If you need to re-run a phase, use `--force` or address the earlier session with
 `--date`. Do not invent past dates.
 
+`janus session open --date YYYY-MM-DD` exists only for backfill/testing; do not
+use it during the daily pipeline unless the operator explicitly asks for a
+past-date session.
+
 ## Phase 1 — macro record
 
 Record the top-down read for the day. Required metric: `regime` in −2..2.

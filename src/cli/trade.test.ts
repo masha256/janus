@@ -339,6 +339,28 @@ test("--size auto and --stop auto use the score plan sizing", async () => {
       recordScreen(db, DATE, assetId,
         { flagged: true, rationale: null, metrics: { score: 8, confidence: 0.9 }, results: { screen_score: 7.2, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
 
+      const YESTERDAY = "2026-07-30";
+      ensureSession(db, YESTERDAY, NOW);
+      stampPhase(db, YESTERDAY, "macro", NOW);
+      stampPhase(db, YESTERDAY, "cluster", NOW);
+      stampPhase(db, YESTERDAY, "coverage", NOW);
+      stampPhase(db, YESTERDAY, "screen", NOW);
+      stampPhase(db, YESTERDAY, "score", NOW);
+      recordMacro(db, YESTERDAY, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
+      recordScreen(db, YESTERDAY, assetId,
+        { flagged: true, rationale: null, metrics: { score: 8, confidence: 0.9 }, results: { screen_score: 7.2, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+      recordScore(db, YESTERDAY, assetId, {
+        strength: 1.5,
+        conviction: 9,
+        directive: "STAND_ASIDE",
+        queue_reason: "flagged",
+        position_state: "flat",
+        rationale: null,
+        metrics: { catalyst: 2, trend: 2, secular: 2, crowding: 50, divergence: 0, confidence: 1 },
+        results: { plan_directive: "STAND_ASIDE" },
+        plan: { directive: "STAND_ASIDE", reason: "prior signal", size_tier: "blocked", signal_gate: "pass", persistence_gate: "fail", trend_gate: "pass", binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a" },
+      }, NOW);
+
       const params = resolveParams(getClusterParams(db, null), getGlobalParams(db));
       const coverageValues = {
         open: 120, high: 135, low: 118, close: 130, volume: 1000,
@@ -361,6 +383,13 @@ test("--size auto and --stop auto use the score plan sizing", async () => {
           positions: [],
           asset: { symbol: "BTC", class: "crypto", cluster_id: null, coverage: coverageValues as any },
           session_date: DATE,
+          recent_scores: [{
+            strength: 1.5,
+            conviction: 9,
+            directive: "STAND_ASIDE",
+            plan: { directive: "STAND_ASIDE", reason: "prior signal", size_tier: "blocked", signal_gate: "pass", persistence_gate: "fail", trend_gate: "pass", binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a" },
+            results: {},
+          }],
         },
         params,
       );

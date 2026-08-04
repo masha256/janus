@@ -176,20 +176,56 @@ function ctxWithPosition(pos, cov = coverage(), prev = null) {
             : [{ asset_id: 1, symbol: "BTC", side: pos.side, units: pos.units }],
         asset: { ...flat.asset, coverage: cov },
         previous_score: prev,
+        recent_scores: prev === null ? [] : [prev],
     };
 }
-test("flat + strong bullish + trend gate pass -> INITIATE", () => {
-    const got = deriveScore(m(2, 2, 2, 50, false, false), ctxWithPosition({ side: null, units: 0 }), DEFAULT_PARAMS);
+test("flat + strong bullish + trend gate pass + persisted -> INITIATE", () => {
+    const prev = {
+        strength: 1.8, conviction: 9, directive: "STAND_ASIDE",
+        plan: {
+            directive: "STAND_ASIDE", reason: "prior signal", size_tier: "blocked",
+            signal_gate: "pass", persistence_gate: "fail", trend_gate: "pass",
+            binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a",
+        },
+        results: {},
+    };
+    const got = deriveScore(m(2, 2, 2, 50, false, false), ctxWithPosition({ side: null, units: 0 }, coverage(), prev), DEFAULT_PARAMS);
     assert.equal(got.directive, "INITIATE");
     assert.equal(got.plan.directive, "INITIATE");
     assert.equal(got.plan.trend_gate, "pass");
     assert.equal(got.plan.entry_plan?.side, "long");
 });
 test("flat + strong bullish + trend gate fail -> STAND_ASIDE", () => {
-    const got = deriveScore(m(2, 2, 2, 50, false, false), ctxWithPosition({ side: null, units: 0 }, coverage({ cross_px_50: "below", px_vs_sma50: -5 })), DEFAULT_PARAMS);
+    const got = deriveScore(m(2, 2, 2, 50, false, false), ctxWithPosition({ side: null, units: 0 }, coverage({ px_vs_sma20: -2, px_vs_sma50: -5 })), DEFAULT_PARAMS);
     assert.equal(got.directive, "STAND_ASIDE");
     assert.equal(got.plan.trend_gate, "fail");
     assert.equal(got.plan.entry_plan, undefined);
+});
+test("flat + strong bullish + trend gate starter + persisted -> INITIATE with starter tier", () => {
+    const prev = {
+        strength: 1.8, conviction: 9, directive: "STAND_ASIDE",
+        plan: {
+            directive: "STAND_ASIDE", reason: "prior signal", size_tier: "blocked",
+            signal_gate: "pass", persistence_gate: "fail", trend_gate: "pass",
+            binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a",
+        },
+        results: {},
+    };
+    const params = { ...DEFAULT_PARAMS, per_asset_max_notional_pct: 100 };
+    const got = deriveScore(m(2, 2, 2, 50, false, false), ctxWithPosition({ side: null, units: 0 }, coverage({ px_vs_sma20: 2, px_vs_sma50: -1 }), prev), params);
+    assert.equal(got.directive, "INITIATE");
+    assert.equal(got.plan.trend_gate, "starter");
+    assert.equal(got.plan.size_tier, "starter");
+    assert.equal(got.plan.entry_plan?.side, "long");
+    const full = deriveScore(m(2, 2, 2, 50, false, false), ctxWithPosition({ side: null, units: 0 }, coverage({ px_vs_sma20: 2, px_vs_sma50: 2 }), prev), params);
+    assert.equal(full.plan.trend_gate, "pass");
+    assert.equal(full.plan.size_tier, "full");
+    assert.ok(full.plan.sizing_plan, "full tier has sizing plan");
+    assert.ok(got.plan.sizing_plan, "starter tier has sizing plan");
+    const gotSizing = got.plan.sizing_plan;
+    const fullSizing = full.plan.sizing_plan;
+    assert.equal(gotSizing.suggested_notional, fullSizing.suggested_notional * 0.5, "starter notional is fraction of full notional");
+    assert.equal(gotSizing.risk_dollars, fullSizing.risk_dollars * 0.5, "starter risk is fraction of full risk");
 });
 test("holding long + score flips hard -> EXIT", () => {
     const got = deriveScore(m(-2, -2, -2, 50, false, false), ctxWithPosition(longPos(2)), DEFAULT_PARAMS);
