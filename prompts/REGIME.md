@@ -120,7 +120,7 @@ and `description` from `janus cluster list` to understand what it represents.
 2. **Apply a cluster-specific delta.** The final cluster regime is the macro
    regime plus the cluster delta, clamped to `[-2, 2]`.
 
-   | Cluster signal strength | Delta to macro regime |
+   | Cluster signal direction | Delta to macro regime |
    | --- | --- |
    | Strong cluster tailwind | +0.4 to +0.7 |
    | Moderate cluster tailwind | +0.2 to +0.3 |

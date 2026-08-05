@@ -263,7 +263,7 @@ test("--size auto and --stop auto use the score plan sizing", async () => {
             recordMacro(db, YESTERDAY, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
             recordScreen(db, YESTERDAY, assetId, { flagged: true, rationale: null, metrics: { score: 8, confidence: 0.9 }, results: { screen_score: 7.2, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
             recordScore(db, YESTERDAY, assetId, {
-                strength: 1.5,
+                direction: 1.5,
                 conviction: 9,
                 directive: "STAND_ASIDE",
                 queue_reason: "flagged",
@@ -294,7 +294,7 @@ test("--size auto and --stop auto use the score plan sizing", async () => {
                 asset: { symbol: "BTC", class: "crypto", cluster_id: null, coverage: coverageValues },
                 session_date: DATE,
                 recent_scores: [{
-                        strength: 1.5,
+                        direction: 1.5,
                         conviction: 9,
                         directive: "STAND_ASIDE",
                         plan: { directive: "STAND_ASIDE", reason: "prior signal", size_tier: "blocked", signal_gate: "pass", persistence_gate: "fail", trend_gate: "pass", binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a" },
@@ -304,7 +304,7 @@ test("--size auto and --stop auto use the score plan sizing", async () => {
             assert.equal(result.directive, "INITIATE", `expected INITIATE, got ${result.directive}`);
             assert.ok(result.plan.sizing_plan, "plan should include sizing_plan");
             recordScore(db, DATE, assetId, {
-                strength: result.strength,
+                direction: result.direction,
                 conviction: result.conviction,
                 directive: result.directive,
                 queue_reason: "flagged",

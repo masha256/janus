@@ -199,10 +199,10 @@ test("the full daily pipeline runs end to end", async () => {
     });
     assert.ok(typeof results["sentiment"] === "number" && Math.abs(results["sentiment"] - 0.5) < 1e-9);
     assert.ok(typeof results["agreement"] === "number" && results["agreement"] > 0 && results["agreement"] <= 1);
-    // strength and conviction are columns, so a score list can sort and filter on
+    // direction and conviction are columns, so a score list can sort and filter on
     // them without touching the result table.
     const scores = await janus("score", "list");
-    assert.ok(scores.body.data.scores[0].strength > 0);
+    assert.ok(scores.body.data.scores[0].direction > 0);
     assert.ok(scores.body.data.scores[0].conviction >= 1 && scores.body.data.scores[0].conviction <= 10);
     const status = await janus("session", "status");
     assert.equal(status.body.data.next_phase, null, "every phase should be complete");

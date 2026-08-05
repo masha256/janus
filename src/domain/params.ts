@@ -25,12 +25,12 @@ export const DEFAULT_PARAMS: Record<string, number> = {
   min_history_bars: 200,
   max_units: 3,
 
-  // signalGate — strength and conviction thresholds.
-  signal_strength_initiate: 1.0,
+  // signalGate — direction and conviction thresholds.
+  signal_direction_initiate: 1.0,
   signal_conviction_initiate: 6,
-  signal_strength_add: 1.0,
+  signal_direction_add: 1.0,
   signal_conviction_add: 7,
-  signal_strength_exit: 1.0,
+  signal_direction_exit: 1.0,
 
   // persistenceGate — how many run-days the signalGate must have passed.
   signal_persist_days: 2,
@@ -52,7 +52,7 @@ export const DEFAULT_PARAMS: Record<string, number> = {
 
   // flipflopGate — cooldown and opposite-direction re-entry rules.
   flipflop_cooldown_days: 5,
-  flipflop_opposite_strength_min: 0.6,
+  flipflop_opposite_direction_min: 0.6,
   flipflop_opposite_persist_days: 3,
 
   // heatGate — account-level risk heat and per-position sizing caps.
@@ -79,7 +79,7 @@ export const DEFAULT_PARAMS: Record<string, number> = {
   regime_trigger_short_min: -1.5,
   regime_force_exit_threshold: 1.8,
   actionable_catalyst_min: 1.5,
-  actionable_strength_delta: 1.5,
+  actionable_direction_delta: 1.5,
 };
 
 export function resolveParams(

@@ -34,10 +34,10 @@ const WEIGHT_FALLBACK = 0;
  * to [-2, 2].
  * Conviction fuses direction magnitude, factor agreement, and the agent's
  * confidence: 1 + 9 * (|D|/2)^0.8 * agree^0.3 * Q^0.2. Direction is how
- * bullish/bearish; conviction is strength × agreement across factors × data
+ * bullish/bearish; conviction is |direction| × agreement across factors × data
  * quality, so mixed signals score low conviction even when net-positive.
  *
- * The directive ladder then turns strength, conviction, the current position,
+ * The directive ladder then turns direction, conviction, the current position,
  * the trend/MA hard gate, and an optional regime extreme-contrarian trigger
  * into INITIATE/ADD/HOLD/TRIM/EXIT/STAND_ASIDE, with a persistence rule that
  * makes HOLD the default and resists flip-flopping.
@@ -69,7 +69,7 @@ export function deriveScore(metrics, context, params) {
     const wSecular = params["w_secular"] ?? WEIGHT_FALLBACK;
     // Weighted mean, normalised by total |weight| so a retune rescales the
     // score's sensitivity rather than its absolute magnitude, keeping every
-    // downstream threshold (screen_threshold, strength_initiate...) comparable.
+    // downstream threshold (screen_threshold, signal_direction_initiate...) comparable.
     const contributions = [
         { key: "catalyst", weight: wCat, value: catalyst },
         { key: "sentiment", weight: wSent, value: sentiment },
@@ -86,8 +86,8 @@ export function deriveScore(metrics, context, params) {
         totalAbsWeight += Math.abs(weight);
         energy += Math.abs(c);
     }
-    const directionRaw = totalAbsWeight === 0 ? 0 : weightedSum / totalAbsWeight;
-    const direction = clamp(directionRaw, -2, 2);
+    const netDirectionRaw = totalAbsWeight === 0 ? 0 : weightedSum / totalAbsWeight;
+    const direction = clamp(netDirectionRaw, -2, 2);
     // Agreement: how much of the weighted energy points the same way as the
     // net. 1.0 = every factor pushes the same direction; 0.0 = they cancel.
     // Mixed signals must score low conviction even when net-positive, so it
@@ -103,7 +103,7 @@ export function deriveScore(metrics, context, params) {
     if (sizingPlan)
         plan.sizing_plan = sizingPlan;
     return {
-        strength: direction,
+        direction,
         conviction: Math.round(conviction),
         directive: plan.directive,
         plan,
@@ -201,12 +201,12 @@ function sentimentFromCrowding(P, trend, capitulation, divergence, fearPremium, 
  * - Persistence/flipflop gates resist flip-flopping unless there is an
  *   actionable new signal.
  */
-function derivePlan(strength, conviction, position, context, catalyst, params) {
-    const side = strength > 0 ? "long" : strength < 0 ? "short" : null;
-    const absStrength = Math.abs(strength);
+function derivePlan(direction, conviction, position, context, catalyst, params) {
+    const side = direction > 0 ? "long" : direction < 0 ? "short" : null;
+    const absDirection = Math.abs(direction);
     const regimeSmile = requireNum(context.screen.results, "regime_smile", -2, 2);
     // Evaluate every gate so the plan can report why it was allowed or blocked.
-    const { signal, persistence, trend, binary, heat: initialHeat, flipflop } = runGates(strength, conviction, position, context.screen.metrics, {
+    const { signal, persistence, trend, binary, heat: initialHeat, flipflop } = runGates(direction, conviction, position, context.screen.metrics, {
         params,
         sessionDate: context.session_date,
         coverage: context.asset.coverage,
@@ -234,7 +234,7 @@ function derivePlan(strength, conviction, position, context, catalyst, params) {
     const convHold = params["conv_hold"] ?? 4;
     const maxUnits = params["max_units"] ?? 3;
     const isWorking = position.side !== null &&
-        ((position.side === "long" && strength > 0) || (position.side === "short" && strength < 0));
+        ((position.side === "long" && direction > 0) || (position.side === "short" && direction < 0));
     let plan;
     let sizingPlan;
     if (position.side === null) {
@@ -298,7 +298,7 @@ function derivePlan(strength, conviction, position, context, catalyst, params) {
             sizingPlan = buildSizingPlan(side, context, params, sizeTier);
             plan = {
                 directive: "INITIATE",
-                reason: `strength ${strength.toFixed(2)} conviction ${conviction} + gates pass${sizeTier === "starter" ? " (starter tier)" : ""}`,
+                reason: `direction ${direction.toFixed(2)} conviction ${conviction} + gates pass${sizeTier === "starter" ? " (starter tier)" : ""}`,
                 size_tier: sizeTier,
                 signal_gate: signal,
                 persistence_gate: persistence,
@@ -318,8 +318,8 @@ function derivePlan(strength, conviction, position, context, catalyst, params) {
         const posUnits = position.units;
         const aligned = side === posSide;
         const misaligned = side !== null && !aligned;
-        const disagreement = misaligned ? absStrength : 0;
-        const strengthExit = params["signal_strength_exit"] ?? 1.0;
+        const disagreement = misaligned ? absDirection : 0;
+        const directionExit = params["signal_direction_exit"] ?? 1.0;
         if (regimeForcesExit(posSide)) {
             plan = {
                 directive: "EXIT",
@@ -335,7 +335,7 @@ function derivePlan(strength, conviction, position, context, catalyst, params) {
                 stop_plan: { action: "hold", affected_units: "all", rationale: "exit entire position" },
             };
         }
-        else if (misaligned && disagreement >= strengthExit && conviction >= convHold) {
+        else if (misaligned && disagreement >= directionExit && conviction >= convHold) {
             plan = {
                 directive: "EXIT",
                 reason: `score flipped against ${posSide} by ${disagreement.toFixed(2)} with conviction ${conviction}`,
@@ -372,7 +372,7 @@ function derivePlan(strength, conviction, position, context, catalyst, params) {
             sizingPlan = buildSizingPlan(posSide, context, params, sizeTier);
             plan = {
                 directive: "ADD",
-                reason: `position working, strength ${strength.toFixed(2)} conviction ${conviction} allow add${sizeTier === "starter" ? " (starter tier)" : ""}`,
+                reason: `position working, direction ${direction.toFixed(2)} conviction ${conviction} allow add${sizeTier === "starter" ? " (starter tier)" : ""}`,
                 size_tier: sizeTier,
                 signal_gate: signal,
                 persistence_gate: persistence,
@@ -389,7 +389,7 @@ function derivePlan(strength, conviction, position, context, catalyst, params) {
                 directive: "HOLD",
                 reason: aligned
                     ? "thesis intact"
-                    : `mild disagreement ${strength.toFixed(2)} but conviction ${conviction} keeps thesis on review`,
+                    : `mild disagreement ${direction.toFixed(2)} but conviction ${conviction} keeps thesis on review`,
                 size_tier: sizeTier,
                 signal_gate: signal,
                 persistence_gate: persistence,
@@ -407,7 +407,7 @@ function derivePlan(strength, conviction, position, context, catalyst, params) {
         const prev = previousScore.directive;
         const curr = plan.directive;
         if ((prev === "HOLD" || prev === "ADD") && (curr === "EXIT" || curr === "TRIM")) {
-            if (!actionableNewSignal(strength, catalyst, context, previousScore, params)) {
+            if (!actionableNewSignal(direction, catalyst, context, previousScore, params)) {
                 // Downgrade EXIT to TRIM and TRIM to HOLD unless already at 1 unit.
                 if (curr === "EXIT" && position.side !== null && position.units > 1) {
                     plan = {
@@ -434,7 +434,7 @@ function derivePlan(strength, conviction, position, context, catalyst, params) {
             }
         }
         else if (prev === "STAND_ASIDE" && curr === "INITIATE") {
-            if (sizeTier === "blocked" || !actionableNewSignal(strength, catalyst, context, previousScore, params)) {
+            if (sizeTier === "blocked" || !actionableNewSignal(direction, catalyst, context, previousScore, params)) {
                 plan = {
                     ...plan,
                     directive: "STAND_ASIDE",

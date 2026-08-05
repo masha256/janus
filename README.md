@@ -93,9 +93,9 @@ $ janus score list --human
 session_date: 2026-08-01
 count: 1
 scores (1):
-  symbol  class   strength  conviction  directive  metrics             results
+  symbol  class   direction  conviction  directive  metrics             results
   ------  ------  --------  ----------  ---------  ------------------  -------------------
-  XPL     crypto  2         10          NONE       catalyst=2 trend=2  agreement=1 ...
+  XPL     crypto  2          10          NONE       catalyst=2 trend=2  agreement=1 ...
 ```
 
 It is a display flag only — JSON stays the default, so nothing an agent parses changes.
@@ -188,11 +188,10 @@ the reads.
    never rewrites history. Completes once every covered asset is screened.
 5. **`score`** — a weighted decision for everything in the queue: assets flagged this
    session, unioned with anything holding an open trade. `janus score queue` returns that
-   set with its coverage and screen attached. `score record` derives `strength`,
+   set with its coverage and screen attached. `score record` derives `direction`,
    `conviction`, and a directive from the `--factor` values, the session's macro and
    cluster reads, and the resolved parameters, snapshotting the position state as it
-   stood. The directive is a stub returning `NONE` until the ladder is written. Completes
-   once the queue is fully scored.
+   stood. Completes once the queue is fully scored.
 
 Which metrics each phase actually requires is the formula's business, not the command's —
 see [Metrics and results](#metrics-and-results).
@@ -217,7 +216,7 @@ A value that parses as a number lands in `value_num`; anything else is free text
 
 The phase row keeps what is neither bag — state, summary, rationale, directive — plus the
 handful of conclusions that are always present and worth sorting and filtering on:
-`screen.flagged`, and `score.strength` / `score.conviction`. Those are set by the formula
+`screen.flagged`, and `score.direction` / `score.conviction`. Those are set by the formula
 like any other conclusion; they are columns because every row has one.
 
 **The CLI does not know what any metric means.** It parses `--metric` pairs, hands the
@@ -233,7 +232,7 @@ What the v1 formulas require and produce today:
 | macro | `deriveMacroRead` (`domain/read.ts`) | `regime` (−2…2) | (none v1) |
 | cluster | `deriveClusterRead` (`domain/read.ts`) | `regime` (−2…2) | (none v1) |
 | screen | `deriveScreen` (`domain/screen.ts`) | `score` (1…10), `confidence` (0…1) | the `flagged` column, and `threshold`, `regime_smile` |
-| score | `deriveScore` (`domain/score.ts`) | at least one `--factor`, each −2…2 (`crowding` 1…100; `confidence` 0…1 quality, absent = 0) | the `strength`, `conviction`, and `directive` columns, and `w_<factor>`, `sentiment`, `agreement`, `confidence` |
+| score | `deriveScore` (`domain/score.ts`) | at least one `--factor`, each −2…2 (`crowding` 1…100; `confidence` 0…1 quality, absent = 0) | the `direction`, `conviction`, and `directive` columns, and `w_<factor>`, `sentiment`, `agreement`, `confidence` |
 
 **Everywhere it appears, `confidence` is a quality on 0…1** — higher means more
 trustworthy, and a missing confidence means "no information" (0), never
@@ -253,13 +252,13 @@ gets the whole macro read. `deriveScore` gets more still:
   against what is already on;
 - the asset itself, with its `CoverageValues` for the session.
 
-`deriveScore` turns that context into `strength` = normalised weighted mean of
-the factor scores, and `conviction` = strength magnitude × factor **agreement**
+`deriveScore` turns that context into `direction` = normalised weighted mean of
+the factor scores, and `conviction` = |direction| magnitude × factor **agreement**
 × agent `confidence` — so mixed signals score low conviction even when
 net-positive (the "direction ≠ conviction" rule). It snapshots the exact
 weights, sentiment, agreement, and confidence it used onto the row.
 
-`strength` and `conviction` are the two standardised numbers the directive is
+`direction` and `conviction` are the two standardised numbers the directive is
 derived from — see the parameter table below for the thresholds each one gates.
 
 ****All four formulas are v1 placeholders**, marked as such in their own files. Every
@@ -276,7 +275,7 @@ or blocked.
 
 | Gate | Purpose | Result values |
 | --- | --- | --- |
-| `signalGate` | Strength/conviction thresholds for initiate, add, and exit. | `pass` / `fail` |
+| `signalGate` | Direction/conviction thresholds for initiate, add, and exit. | `pass` / `fail` |
 | `persistenceGate` | Signal must persist for `signal_persist_days` run-days. | `pass` / `fail` |
 | `trendGate` | Price/MA structure for the proposed direction. | `pass` / `starter` / `fail` / `late_trend` |
 | `binaryGate` | Blocks entry around a known binary event recorded on the screen. | `pass` / `blocked` |
@@ -292,11 +291,11 @@ HOLD/EXIT/TRIM directives still carry the gate status for observability.
 
 | Parameter | Gate | Default | Description |
 | --- | --- | --- | --- |
-| `signal_strength_initiate` | signalGate | `1.0` | Minimum `\|strength\|` for a flat asset to pass the signal gate. |
+| `signal_direction_initiate` | signalGate | `1.0` | Minimum `\|direction\|` for a flat asset to pass the signal gate. |
 | `signal_conviction_initiate` | signalGate | `6` | Minimum `conviction` for a flat asset to pass the signal gate. |
-| `signal_strength_add` | signalGate | `1.0` | Minimum `\|strength\|` for an aligned position to pass the signal gate for adding. |
+| `signal_direction_add` | signalGate | `1.0` | Minimum `\|direction\|` for an aligned position to pass the signal gate for adding. |
 | `signal_conviction_add` | signalGate | `7` | Minimum `conviction` for an aligned position to pass the signal gate for adding. |
-| `signal_strength_exit` | signalGate | `1.0` | Minimum `\|strength\|` against an open position to pass the signal gate for exit. |
+| `signal_direction_exit` | signalGate | `1.0` | Minimum `\|direction\|` against an open position to pass the signal gate for exit. |
 | `signal_persist_days` | persistenceGate | `2` | Run-days the signal gate must have passed, including today. |
 | `trend_sma20_threshold_long` | trendGate | `0` | Long `px_vs_sma20` must be > threshold to be starter or pass. |
 | `trend_sma50_threshold_long` | trendGate | `0` | Long `px_vs_sma50` must be >= threshold to be pass (below is starter). |
@@ -306,7 +305,7 @@ HOLD/EXIT/TRIM directives still carry the gate status for observability.
 | `late_trend_crowding_extreme` | trendGate | `85` | Crowding level that, with a stretched 200-day MA distance, marks a move as `late_trend`. |
 | `binary_cooldown_days` | binaryGate | `14` | Days after a recorded binary event during which entry is blocked. |
 | `flipflop_cooldown_days` | flipflopGate | `5` | Days after an exit during which opposite-side re-entry faces extra scrutiny. |
-| `flipflop_opposite_strength_min` | flipflopGate | `0.6` | Minimum `\|strength\|` for opposite-side re-entry during the flipflop cooldown. |
+| `flipflop_opposite_direction_min` | flipflopGate | `0.6` | Minimum `\|direction\|` for opposite-side re-entry during the flipflop cooldown. |
 | `flipflop_opposite_persist_days` | flipflopGate | `3` | Run-days the opposite-side signal must have persisted to override the flipflop cooldown. |
 | `account_capital` | heatGate | `100000` | Total investable account capital used for sizing and heat calculations. |
 | `max_heat_pct` | heatGate | `15` | Account-level heat ceiling as a percent of `account_capital`. |
@@ -351,7 +350,7 @@ The directive starts from the gates and current position state, then the
 **persistence rule** may downgrade a fresh `EXIT`/`TRIM` or a fresh `INITIATE` if
 there is no actionable new signal. A signal is actionable when the screen notes
 `capitulation` or `divergence`, when `\|catalyst\| ≥ actionable_catalyst_min`, or
-when `\|strength - previous_strength\| ≥ actionable_strength_delta`.
+when `\|direction - previous_direction\| ≥ actionable_direction_delta`.
 
 ### Regime triggers
 
@@ -470,11 +469,11 @@ each parameter does; the table below is a compact reference.
 | --- | --- | --- | --- |
 | `beta_factor` | screen | `1.0` | Multiplier applied to the raw screen score before the threshold check. |
 | `screen_threshold` | screen | `4.0` | Minimum `screen_score` for an asset to be flagged for the scoring queue. |
-| `w_catalyst` | score | `0.25` | Weight of the momentum/catalyst factor in `strength`. |
-| `w_sentiment` | score | `0.25` | Weight of the contrarian positioning/crowding factor in `strength`. |
-| `w_trend` | score | `0.30` | Weight of the trend/flow factor in `strength`. |
-| `w_regime` | score | `0.15` | Weight of the session's `regime_smile` in `strength`. |
-| `w_secular` | score | `0.05` | Weight of the longer-horizon thesis factor in `strength`. |
+| `w_catalyst` | score | `0.25` | Weight of the momentum/catalyst factor in `direction`. |
+| `w_sentiment` | score | `0.25` | Weight of the contrarian positioning/crowding factor in `direction`. |
+| `w_trend` | score | `0.30` | Weight of the trend/flow factor in `direction`. |
+| `w_regime` | score | `0.15` | Weight of the session's `regime_smile` in `direction`. |
+| `w_secular` | score | `0.05` | Weight of the longer-horizon thesis factor in `direction`. |
 | `fear_premium` | score | `1.25` | Scales the bullish side of the contrarian sentiment fade; >1 makes panic bounces fade harder than greed tops. |
 | `divergence_boost` | score | `0.5` | Widens a contrarian fade when a price/crowding divergence is present. |
 | `min_history_bars` | asset | `200` | Minimum listed bars for an asset to be added to the roster; below this a 200-day MA is impossible. |
@@ -484,7 +483,7 @@ each parameter does; the table below is a compact reference.
 | `regime_trigger_short_min` | directive | `-1.5` | Block new shorts and force short exits when `regime_smile` reaches this negative extreme. |
 | `regime_force_exit_threshold` | directive | `1.8` | Force a full `EXIT` when `regime_smile` exceeds this against an open position. |
 | `actionable_catalyst_min` | directive | `1.5` | Minimum `\|catalyst\|` that counts as an actionable new signal for the persistence rule. |
-| `actionable_strength_delta` | directive | `1.5` | Minimum change in `\|strength\|` from the prior score that counts as actionable. |
+| `actionable_direction_delta` | directive | `1.5` | Minimum change in `\|direction\|` from the prior score that counts as actionable. |
 
 Boolean parameters use `1` for true and `0` for false.
 

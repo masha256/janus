@@ -73,7 +73,7 @@ async function withHarness(run) {
         rmSync(file, { force: true });
     }
 }
-test("a flagged asset scores, and strength/conviction/directive match the domain formulas", async () => {
+test("a flagged asset scores, and direction/conviction/directive match the domain formulas", async () => {
     await withHarness(async (file) => {
         withDb(file, (db) => {
             recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
@@ -81,9 +81,9 @@ test("a flagged asset scores, and strength/conviction/directive match the domain
         });
         const result = (await handle("record", ["BTC", "--factor", "catalyst=2", "--factor", "trend=2", "--factor", "secular=2", "--factor", "crowding=50", "--factor", "divergence=0"]));
         assert.equal(result.directive, "STAND_ASIDE");
-        assert.equal(typeof result.strength, "number");
+        assert.equal(typeof result.direction, "number");
         assert.equal(typeof result.conviction, "number");
-        assert.equal(result.results["strength"], undefined);
+        assert.equal(result.results["direction"], undefined);
         assert.equal(result.results["conviction"], undefined);
         const typed = result;
         assert.equal(typed.plan?.directive, "STAND_ASIDE");

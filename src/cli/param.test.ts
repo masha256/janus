@@ -102,7 +102,7 @@ test("a global param reaches the scoring decision for an unclustered asset", asy
     const args = ["BTC", "--factor", "catalyst=2", "--factor", "trend=0", "--factor", "secular=0", "--factor", "crowding=50"];
     const before = (await score("record", args)) as {
       results: Record<string, number>;
-      strength: number;
+      direction: number;
     };
     assert.equal(before.results["w_trend"], DEFAULT_PARAMS["w_trend"], "default w_trend");
 
@@ -110,7 +110,7 @@ test("a global param reaches the scoring decision for an unclustered asset", asy
 
     const after = (await score("record", args)) as {
       results: Record<string, number>;
-      strength: number;
+      direction: number;
     };
     assert.equal(after.results["w_trend"], 3, "the global rung now feeds deriveScore");
   });

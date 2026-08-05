@@ -18,16 +18,16 @@ test("a metric bag collapses to k=v, and null reads as a dash", () => {
 
 test("a list of records becomes an aligned table under its key", () => {
   const rows = [
-    { symbol: "BTC", strength: 2 },
-    { symbol: "ETHEREUM", strength: -1.25 },
+    { symbol: "BTC", direction: 2 },
+    { symbol: "ETHEREUM", direction: -1.25 },
   ];
   assert.equal(
     renderHuman({ count: 2, scores: rows }),
     [
       "count: 2",
       "scores (2):",
-      "  symbol    strength",
-      "  --------  --------",
+      "  symbol    direction",
+      "  --------  ---------",
       "  BTC       2",
       "  ETHEREUM  -1.25",
     ].join("\n"),

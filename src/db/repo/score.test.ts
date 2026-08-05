@@ -103,7 +103,7 @@ test("openPositions reports the whole book, and nothing with zero open units", (
 type Metrics = Record<string, number | string>;
 
 const scoreRow = {
-  strength: 1.5, conviction: 8, directive: "INITIATE", queue_reason: "flagged",
+  direction: 1.5, conviction: 8, directive: "INITIATE", queue_reason: "flagged",
   position_state: "flat", rationale: null,
 };
 
@@ -117,11 +117,11 @@ test("recordScore writes the row and its metrics together", () => {
   }, NOW);
 
   const rows = listScores(db, DATE) as
-    { symbol: string; directive: string; strength: number; conviction: number;
+    { symbol: string; directive: string; direction: number; conviction: number;
       metrics: Metrics; results: Metrics }[];
   assert.equal(rows.length, 1);
   assert.equal(rows[0]!.directive, "INITIATE");
-  assert.equal(rows[0]!.strength, 1.5, "strength is a column, not a result");
+  assert.equal(rows[0]!.direction, 1.5, "direction is a column, not a result");
   assert.equal(rows[0]!.conviction, 8);
   assert.deepEqual(rows[0]!.metrics, { catalyst: 2, sentiment: -1 }, "the factors as given");
   assert.deepEqual(rows[0]!.results, { w_catalyst: 1, w_sentiment: -1 }, "what was derived");
@@ -147,11 +147,11 @@ test("re-scoring replaces the previous metrics and results rather than merging t
   db.close();
 });
 
-test("listScores orders by |strength| descending", () => {
+test("listScores orders by |direction| descending", () => {
   const db = fresh();
-  for (const [symbol, strength] of [["BTC", 0.5], ["ETH", -1.9], ["SOL", 1.2]] as const) {
+  for (const [symbol, direction] of [["BTC", 0.5], ["ETH", -1.9], ["SOL", 1.2]] as const) {
     recordScore(db, DATE, requireAssetBySymbol(db, symbol).id,
-      { ...scoreRow, strength, metrics: {}, results: {} }, NOW);
+      { ...scoreRow, direction, metrics: {}, results: {} }, NOW);
   }
   const rows = listScores(db, DATE) as { symbol: string }[];
   assert.deepEqual(rows.map((r) => r.symbol), ["ETH", "SOL", "BTC"]);

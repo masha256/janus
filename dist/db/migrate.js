@@ -159,12 +159,12 @@ CREATE TABLE screen_metric (
     ON DELETE CASCADE
 );
 
--- strength and conviction are columns, not results: every score has them, and
+-- direction and conviction are columns, not results: every score has them, and
 -- they are what you sort and filter a session's decisions by.
 CREATE TABLE score (
   session_date    TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
   asset_id        INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
-  strength        REAL NOT NULL,
+  direction       REAL NOT NULL,
   conviction      REAL NOT NULL,
   directive       TEXT NOT NULL,
   queue_reason    TEXT NOT NULL,
@@ -186,7 +186,7 @@ CREATE TABLE score_metric (
     ON DELETE CASCADE
 );
 
--- What the scoring formula concluded: strength, conviction, applied weights.
+-- What the scoring formula concluded: direction, conviction, applied weights.
 CREATE TABLE score_result (
   session_date  TEXT NOT NULL,
   asset_id      INTEGER NOT NULL,

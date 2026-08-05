@@ -35,7 +35,7 @@ test("defaults match the spec", () => {
     assert.equal(DEFAULT_PARAMS["regime_trigger_short_min"], -1.5);
     assert.equal(DEFAULT_PARAMS["regime_force_exit_threshold"], 1.8);
     assert.equal(DEFAULT_PARAMS["actionable_catalyst_min"], 1.5);
-    assert.equal(DEFAULT_PARAMS["actionable_strength_delta"], 1.5);
+    assert.equal(DEFAULT_PARAMS["actionable_direction_delta"], 1.5);
 });
 test("cluster beats global beats default", () => {
     const r = resolveParams({ w_catalyst: 2 }, { w_catalyst: 1.5, w_sentiment: 0.5 });

@@ -12,7 +12,7 @@ export type QueueEntry = {
 
 export type ScoreRow = {
   /** The two standardised numbers the directive comes from. Always present, so: columns. */
-  strength: number;
+  direction: number;
   conviction: number;
   directive: string;
   queue_reason: string;
@@ -96,14 +96,14 @@ export function recordScore(
   db.exec("BEGIN");
   try {
     db.prepare(
-      `INSERT INTO score (session_date, asset_id, strength, conviction, directive, queue_reason, position_state, rationale, recorded_at)
+      `INSERT INTO score (session_date, asset_id, direction, conviction, directive, queue_reason, position_state, rationale, recorded_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(session_date, asset_id) DO UPDATE SET
-         strength = excluded.strength, conviction = excluded.conviction,
+         direction = excluded.direction, conviction = excluded.conviction,
          directive = excluded.directive,
          queue_reason = excluded.queue_reason, position_state = excluded.position_state,
          rationale = excluded.rationale, recorded_at = excluded.recorded_at`,
-    ).run(date, assetId, row.strength, row.conviction, row.directive, row.queue_reason, row.position_state, row.rationale, now);
+    ).run(date, assetId, row.direction, row.conviction, row.directive, row.queue_reason, row.position_state, row.rationale, now);
     const scope = { session_date: date, asset_id: assetId };
     replaceMetrics(db, "score_metric", scope, row.metrics);
     replaceMetrics(db, "score_result", scope, row.results);
@@ -123,10 +123,10 @@ export function recentScores(
 ): import("../../domain/score.ts").ScoreResult[] {
   const rows = db
     .prepare(
-      `SELECT session_date, asset_id, strength, conviction, directive, queue_reason, position_state, rationale
+      `SELECT session_date, asset_id, direction, conviction, directive, queue_reason, position_state, rationale
        FROM score WHERE asset_id = ? AND session_date < ? ORDER BY session_date DESC LIMIT ?`,
     )
-    .all(assetId, beforeDate, limit) as { session_date: string; asset_id: number; strength: number; conviction: number; directive: string; queue_reason: string; position_state: string; rationale: string | null }[];
+    .all(assetId, beforeDate, limit) as { session_date: string; asset_id: number; direction: number; conviction: number; directive: string; queue_reason: string; position_state: string; rationale: string | null }[];
 
   return rows.map((row) => {
     const metrics = metricsByEntity(db, "score_metric", "asset_id", row.session_date);
@@ -134,7 +134,7 @@ export function recentScores(
     const r = results.get(row.asset_id) ?? {};
     const plan = scorePlanFromResultsStatic(r);
     return {
-      strength: row.strength,
+      direction: row.direction,
       conviction: row.conviction,
       directive: row.directive as import("../../domain/directive.ts").Directive,
       plan: plan ?? {
@@ -187,15 +187,15 @@ export function previousScore(
     .prepare(
       `SELECT * FROM score WHERE asset_id = ? AND session_date < ? ORDER BY session_date DESC LIMIT 1`,
     )
-    .get(assetId, beforeDate) as { session_date: string; asset_id: number; strength: number; conviction: number; directive: string; queue_reason: string; position_state: string; rationale: string | null } | undefined;
+    .get(assetId, beforeDate) as { session_date: string; asset_id: number; direction: number; conviction: number; directive: string; queue_reason: string; position_state: string; rationale: string | null } | undefined;
   if (row === undefined) return null;
   const metrics = metricsByEntity(db, "score_metric", "asset_id", row.session_date);
   const results = metricsByEntity(db, "score_result", "asset_id", row.session_date);
-    const r = results.get(row.asset_id) ?? {};
-    const plan = scorePlanFromResultsStatic(r);
-    return {
-      strength: row.strength,
-      conviction: row.conviction,
+  const r = results.get(row.asset_id) ?? {};
+  const plan = scorePlanFromResultsStatic(r);
+  return {
+    direction: row.direction,
+    conviction: row.conviction,
       directive: row.directive as import("../../domain/directive.ts").Directive,
       plan: plan ?? {
         directive: row.directive as import("../../domain/directive.ts").Directive,
@@ -272,14 +272,14 @@ export function getScore(
   db: DatabaseSync,
   date: string,
   assetId: number,
-): { session_date: string; asset_id: number; symbol: string; class: string; strength: number; conviction: number; directive: string; queue_reason: string; position_state: string; rationale: string | null; metrics: Metrics; results: Metrics; plan: import("../../domain/directive.ts").ScorePlan | undefined } | undefined {
+): { session_date: string; asset_id: number; symbol: string; class: string; direction: number; conviction: number; directive: string; queue_reason: string; position_state: string; rationale: string | null; metrics: Metrics; results: Metrics; plan: import("../../domain/directive.ts").ScorePlan | undefined } | undefined {
   const row = db
     .prepare(
       `SELECT a.symbol, a.class, s.* FROM score s
        JOIN asset a ON a.id = s.asset_id
        WHERE s.session_date = ? AND s.asset_id = ?`,
     )
-    .get(date, assetId) as { session_date: string; asset_id: number; symbol: string; class: string; strength: number; conviction: number; directive: string; queue_reason: string; position_state: string; rationale: string | null } | undefined;
+    .get(date, assetId) as { session_date: string; asset_id: number; symbol: string; class: string; direction: number; conviction: number; directive: string; queue_reason: string; position_state: string; rationale: string | null } | undefined;
   if (row === undefined) return undefined;
   const metrics = metricsByEntity(db, "score_metric", "asset_id", date);
   const results = metricsByEntity(db, "score_result", "asset_id", date);
@@ -293,7 +293,7 @@ export function listScores(db: DatabaseSync, date: string): unknown[] {
     .prepare(
       `SELECT a.symbol, a.class, s.* FROM score s
        JOIN asset a ON a.id = s.asset_id
-       WHERE s.session_date = ? ORDER BY ABS(s.strength) DESC, a.symbol`,
+       WHERE s.session_date = ? ORDER BY ABS(s.direction) DESC, a.symbol`,
     )
     .all(date) as { asset_id: number }[];
   const metrics = metricsByEntity(db, "score_metric", "asset_id", date);

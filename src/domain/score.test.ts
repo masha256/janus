@@ -4,7 +4,7 @@ import { deriveScore, type ScoreContext } from "./score.ts";
 import { DEFAULT_PARAMS } from "./params.ts";
 import type { Metrics } from "./metrics.ts";
 
-/** A context that concludes nothing: the metrics alone decide strength and conviction. */
+/** A context that concludes nothing: the metrics alone decide direction and conviction. */
 const flat: ScoreContext = {
   macro: { metrics: {}, results: {} },
   cluster: null,
@@ -54,8 +54,8 @@ test("direction is the weighted mean of factors normalised by total |weight|", (
   // P=50 -> calm middle, trend>0 -> sentiment = 0.4 * 1.25 fear premium = 0.5
   // weights: catalyst 0.25, sentiment 0.25, trend 0.3, regime 0.15, secular 0.05
   // weighted sum = 0.25*2 + 0.25*0.5 + 0.3*1 + 0.15*0 + 0.05*(-1) = 0.875
-  // total |weight| = 1.0, so strength = 0.875
-  assert.ok(Math.abs(got.strength - 0.875) < 1e-12, `got ${got.strength}`);
+  // total |weight| = 1.0, so direction = 0.875
+  assert.ok(Math.abs(got.direction - 0.875) < 1e-12, `got ${got.direction}`);
   assert.equal(got.results["regime"], 0);
   assert.equal(got.results["regime_smile"], 0);
   assert.ok(Math.abs((got.results["weighted_sum"] as number) - 0.875) < 1e-12);
@@ -68,7 +68,7 @@ test("direction stays in range when weights do not sum to 1", () => {
     Object.entries(DEFAULT_PARAMS).map(([k, v]) => [k, k.startsWith("w_") ? v * 2 : v]),
   );
   const got = deriveScore(m(2, 1, -1, 50, false, false), flat, doubled);
-  assert.ok(Math.abs(got.strength - 0.875) < 1e-12, `got ${got.strength}`);
+  assert.ok(Math.abs(got.direction - 0.875) < 1e-12, `got ${got.direction}`);
   assert.equal(got.results["total_abs_weight"], 2.0);
 });
 
@@ -88,7 +88,7 @@ test("sentiment bands match the crowding lookup, with the fear premium applied t
       flat,
       { ...DEFAULT_PARAMS, w_catalyst: 0, w_trend: 0, w_secular: 0, w_regime: 0, w_sentiment: 1 },
     );
-    assert.ok(Math.abs(got.strength - expected) < 1e-12, `crowding ${crowding}: got ${got.strength}, want ${expected}`);
+    assert.ok(Math.abs(got.direction - expected) < 1e-12, `crowding ${crowding}: got ${got.direction}, want ${expected}`);
     assert.equal(got.results["sentiment_summary"], band);
   }
 });
@@ -129,14 +129,14 @@ test("divergence boosts the sentiment in the same direction", () => {
     flat,
     { ...DEFAULT_PARAMS, w_catalyst: 0, w_trend: 0, w_secular: 0, w_regime: 0, w_sentiment: 1 },
   );
-  assert.equal(fearful.strength, 1.25);
+  assert.equal(fearful.direction, 1.25);
 
   const boosted = deriveScore(
     m(0, 1, 0, 20, false, true),
     flat,
     { ...DEFAULT_PARAMS, w_catalyst: 0, w_trend: 0, w_secular: 0, w_regime: 0, w_sentiment: 1 },
   );
-  assert.equal(boosted.strength, 1.75); // (1.0 * 1.25) + 0.5
+  assert.equal(boosted.direction, 1.75); // (1.0 * 1.25) + 0.5
   assert.match(String(boosted.results["sentiment_summary"]), /divergence booster/);
 });
 
@@ -146,7 +146,7 @@ test("divergence booster size is a cluster-tunable param", () => {
     flat,
     { ...DEFAULT_PARAMS, divergence_boost: 1.0, w_catalyst: 0, w_trend: 0, w_secular: 0, w_regime: 0, w_sentiment: 1 },
   );
-  assert.equal(bigger.strength, 2.0); // (1.0 * 1.25) + 1.0, clamped at 2
+  assert.equal(bigger.direction, 2.0); // (1.0 * 1.25) + 1.0, clamped at 2
   assert.equal(bigger.results["divergence_boost"], 1.0);
 
   const off = deriveScore(
@@ -154,7 +154,7 @@ test("divergence booster size is a cluster-tunable param", () => {
     flat,
     { ...DEFAULT_PARAMS, divergence_boost: 0, w_catalyst: 0, w_trend: 0, w_secular: 0, w_regime: 0, w_sentiment: 1 },
   );
-  assert.equal(off.strength, 1.25); // 1.0 * 1.25, no boost
+  assert.equal(off.direction, 1.25); // 1.0 * 1.25, no boost
 });
 
 test("confidence is the scoring metric's own 0..1 quality, not inherited from the screen", () => {
@@ -245,8 +245,8 @@ test("top-down alignment uses regime_smile", () => {
     ctx(1.5, 1.5),
     { ...DEFAULT_PARAMS, w_regime: 5, w_sentiment: 0, w_catalyst: 0, w_trend: 0, w_secular: 0 },
   );
-  assert.ok(bullish.strength > 0, `strength ${bullish.strength}`);
-  assert.ok(Math.abs(bullish.strength - 0.9) < 1e-12, `normalised strength ${bullish.strength}`);
+  assert.ok(bullish.direction > 0, `direction ${bullish.direction}`);
+  assert.ok(Math.abs(bullish.direction - 0.9) < 1e-12, `normalised direction ${bullish.direction}`);
   assert.ok(Math.abs((bullish.results["regime_smile"] as number) - 0.9) < 1e-12, `got ${bullish.results["regime_smile"]}`);
 
   // Without a cluster, the screen would have used the macro regime, so an
@@ -256,7 +256,7 @@ test("top-down alignment uses regime_smile", () => {
     ctx(1.5, null),
     { ...DEFAULT_PARAMS, w_regime: 5, w_sentiment: 0, w_catalyst: 0, w_trend: 0, w_secular: 0 },
   );
-  assert.ok(macroOnly.strength > 0, `strength ${macroOnly.strength}`);
+  assert.ok(macroOnly.direction > 0, `direction ${macroOnly.direction}`);
   assert.ok(Math.abs((macroOnly.results["regime_smile"] as number) - 0.9) < 1e-12, `got ${macroOnly.results["regime_smile"]}`);
 });
 
@@ -304,7 +304,7 @@ function ctxWithPosition(
 
 test("flat + strong bullish + trend gate pass + persisted -> INITIATE", () => {
   const prev: import("./score.ts").ScoreResult = {
-    strength: 1.8, conviction: 9, directive: "STAND_ASIDE",
+    direction: 1.8, conviction: 9, directive: "STAND_ASIDE",
     plan: {
       directive: "STAND_ASIDE", reason: "prior signal", size_tier: "blocked",
       signal_gate: "pass", persistence_gate: "fail", trend_gate: "pass",
@@ -336,7 +336,7 @@ test("flat + strong bullish + trend gate fail -> STAND_ASIDE", () => {
 
 test("flat + strong bullish + trend gate starter + persisted -> INITIATE with starter tier", () => {
   const prev: import("./score.ts").ScoreResult = {
-    strength: 1.8, conviction: 9, directive: "STAND_ASIDE",
+    direction: 1.8, conviction: 9, directive: "STAND_ASIDE",
     plan: {
       directive: "STAND_ASIDE", reason: "prior signal", size_tier: "blocked",
       signal_gate: "pass", persistence_gate: "fail", trend_gate: "pass",
@@ -433,7 +433,7 @@ test("holding long + regime extreme bullish forces EXIT", () => {
 
 test("persistence rule downgrades fresh EXIT to TRIM without actionable signal", () => {
   const prev: import("./score.ts").ScoreResult = {
-    strength: 1.2, conviction: 8, directive: "HOLD",
+    direction: 1.2, conviction: 8, directive: "HOLD",
     plan: {
       directive: "HOLD", reason: "thesis intact", size_tier: "full",
       signal_gate: "pass", persistence_gate: "pass", trend_gate: "pass",
@@ -441,9 +441,9 @@ test("persistence rule downgrades fresh EXIT to TRIM without actionable signal",
     },
     results: {},
   };
-  // Raise actionable_strength_delta so the strength delta alone does not count
+  // Raise actionable_direction_delta so the direction delta alone does not count
   // as a fresh signal; no catalyst/divergence/capitulation is present either.
-  const params = { ...DEFAULT_PARAMS, actionable_strength_delta: 5 };
+  const params = { ...DEFAULT_PARAMS, actionable_direction_delta: 5 };
   const got = deriveScore(
     m(-1, -2, -2, 50, false, false),
     ctxWithPosition(longPos(2), coverage(), prev),
@@ -455,7 +455,7 @@ test("persistence rule downgrades fresh EXIT to TRIM without actionable signal",
 
 test("persistence rule allows EXIT when divergence is actionable", () => {
   const prev: import("./score.ts").ScoreResult = {
-    strength: 1.2, conviction: 8, directive: "HOLD",
+    direction: 1.2, conviction: 8, directive: "HOLD",
     plan: {
       directive: "HOLD", reason: "thesis intact", size_tier: "full",
       signal_gate: "pass", persistence_gate: "pass", trend_gate: "pass",
@@ -463,7 +463,7 @@ test("persistence rule allows EXIT when divergence is actionable", () => {
     },
     results: {},
   };
-  const params = { ...DEFAULT_PARAMS, actionable_strength_delta: 0.5 };
+  const params = { ...DEFAULT_PARAMS, actionable_direction_delta: 0.5 };
   const got = deriveScore(
     m(-1, -2, -2, 50, false, true),
     ctxWithPosition(longPos(2), coverage(), prev),

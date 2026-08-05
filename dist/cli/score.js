@@ -37,7 +37,7 @@ export function build(emit) {
         .option("--date <YYYY-MM-DD>", "address an existing session")
         .action(async (symbol, opts) => emit(await show(symbol, opts.date)));
     cmd.command("list")
-        .description("The scores recorded for a session, strongest first")
+        .description("The scores recorded for a session, by absolute direction first")
         .option("--date <YYYY-MM-DD>", "defaults to today, New York")
         .action(async (opts) => emit(await list(opts.date)));
     return cmd;
@@ -105,10 +105,10 @@ function record(symbol, opts) {
             current_heat: bookHeat(db),
             previous_score: previous,
         };
-        const { strength, conviction, directive, plan, results } = deriveScore(factors, context, params);
+        const { direction, conviction, directive, plan, results } = deriveScore(factors, context, params);
         const position = positionOf(db, asset.id);
         recordScore(db, session.session_date, asset.id, {
-            strength, conviction, directive,
+            direction, conviction, directive,
             queue_reason: entry.queue_reason,
             position_state: formatPosition(position),
             rationale: readText(opts.rationale) ?? null,
@@ -124,7 +124,7 @@ function record(symbol, opts) {
         return {
             session_date: session.session_date,
             symbol: asset.symbol,
-            strength, conviction, directive,
+            direction, conviction, directive,
             position: formatPosition(position),
             queue_reason: entry.queue_reason,
             metrics: factors,
@@ -151,7 +151,7 @@ function show(symbol, date) {
             session_date: on,
             symbol: row.symbol,
             class: row.class,
-            strength: row.strength,
+            direction: row.direction,
             conviction: row.conviction,
             directive: row.directive,
             position: row.position_state,

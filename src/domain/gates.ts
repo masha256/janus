@@ -8,18 +8,18 @@ const boolParam = (params: Record<string, number>, key: string): boolean =>
   (params[key] ?? 0) !== 0;
 
 export function signalGate(
-  strength: number,
+  direction: number,
   conviction: number,
   position: PositionState,
   params: Record<string, number>,
 ): ScorePlan["signal_gate"] {
-  const absStrength = Math.abs(strength);
-  const side: "long" | "short" | null = strength > 0 ? "long" : strength < 0 ? "short" : null;
-  const strengthInitiate = params["signal_strength_initiate"] ?? 1.0;
+  const absDirection = Math.abs(direction);
+  const side: "long" | "short" | null = direction > 0 ? "long" : direction < 0 ? "short" : null;
+  const directionInitiate = params["signal_direction_initiate"] ?? 1.0;
   const convInitiate = params["signal_conviction_initiate"] ?? 6;
-  const strengthAdd = params["signal_strength_add"] ?? 1.0;
+  const directionAdd = params["signal_direction_add"] ?? 1.0;
   const convAdd = params["signal_conviction_add"] ?? 7;
-  const strengthExit = params["signal_strength_exit"] ?? 1.0;
+  const directionExit = params["signal_direction_exit"] ?? 1.0;
   const convHold = params["conv_hold"] ?? 4;
 
   const aligned = position.side !== null && side === position.side;
@@ -27,18 +27,18 @@ export function signalGate(
 
   if (side === null) return "fail";
   if (position.side === null) {
-    return absStrength >= strengthInitiate && conviction >= convInitiate ? "pass" : "fail";
+    return absDirection >= directionInitiate && conviction >= convInitiate ? "pass" : "fail";
   }
   if (misaligned) {
-    return absStrength >= strengthExit && conviction >= convHold ? "pass" : "fail";
+    return absDirection >= directionExit && conviction >= convHold ? "pass" : "fail";
   }
   // Aligned: pass if either add thresholds are met (so ADD can be considered) or
   // at least hold-quality signal is present (so HOLD is not treated as a failure).
-  return absStrength >= strengthAdd && conviction >= convAdd ? "pass" : "fail";
+  return absDirection >= directionAdd && conviction >= convAdd ? "pass" : "fail";
 }
 
 export function persistenceGate(
-  strength: number,
+  direction: number,
   conviction: number,
   side: "long" | "short" | null,
   recentScores: ScoreResult[],
@@ -50,7 +50,7 @@ export function persistenceGate(
     return "fail";
   }
 
-  const strengthInitiate = params["signal_strength_initiate"] ?? 1.0;
+  const directionInitiate = params["signal_direction_initiate"] ?? 1.0;
   const convInitiate = params["signal_conviction_initiate"] ?? 6;
 
   // Walk backwards through recent scores (newest first). Count consecutive days
@@ -59,9 +59,9 @@ export function persistenceGate(
   for (const score of recentScores) {
     const sameSide = side === null
       ? false
-      : (side === "long" && score.strength > 0) || (side === "short" && score.strength < 0);
-    const absStrength = Math.abs(score.strength);
-    if (sameSide && absStrength >= strengthInitiate && score.conviction >= convInitiate) {
+      : (side === "long" && score.direction > 0) || (side === "short" && score.direction < 0);
+    const absDirection = Math.abs(score.direction);
+    if (sameSide && absDirection >= directionInitiate && score.conviction >= convInitiate) {
       count++;
     } else {
       break;
@@ -160,18 +160,18 @@ export function regimeTriggerState(
 }
 
 export function actionableNewSignal(
-  strength: number,
+  direction: number,
   catalyst: number,
   context: ScoreContext,
   previousScore: ScoreResult,
   params: Record<string, number>,
 ): boolean {
   const catalystMin = params["actionable_catalyst_min"] ?? 1.5;
-  const strengthDelta = params["actionable_strength_delta"] ?? 1.5;
+  const directionDelta = params["actionable_direction_delta"] ?? 1.5;
   if (context.screen?.metrics["capitulation"] ?? false) return true;
   if (context.screen?.metrics["divergence"] ?? false) return true;
   if (Math.abs(catalyst) >= catalystMin) return true;
-  if (Math.abs(strength - previousScore.strength) >= strengthDelta) return true;
+  if (Math.abs(direction - previousScore.direction) >= directionDelta) return true;
   return false;
 }
 
@@ -197,7 +197,7 @@ export type GateContext = {
 };
 
 export function runGates(
-  strength: number,
+  direction: number,
   conviction: number,
   position: PositionState,
   metrics: Metrics,
@@ -210,11 +210,11 @@ export function runGates(
   heat: ScorePlan["heat_gate"];
   flipflop: ScorePlan["flipflop_gate"];
 } {
-  const side: "long" | "short" | null = strength > 0 ? "long" : strength < 0 ? "short" : null;
+  const side: "long" | "short" | null = direction > 0 ? "long" : direction < 0 ? "short" : null;
   const crowding = num(metrics, "crowding", 50);
 
-  const signal = signalGate(strength, conviction, position, ctx.params);
-  const persistence = persistenceGate(strength, conviction, side, ctx.recentScores, ctx.params);
+  const signal = signalGate(direction, conviction, position, ctx.params);
+  const persistence = persistenceGate(direction, conviction, side, ctx.recentScores, ctx.params);
   const trend = trendGate(side, ctx.coverage, crowding, ctx.params);
   const binary = binaryGate(ctx.sessionDate, ctx.binary, ctx.params);
   const heat = heatGate(ctx.params, ctx.currentHeat, ctx.proposedHeat);

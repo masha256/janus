@@ -113,7 +113,7 @@ a quality score on 0..1 and is optional — missing means zero.
 janus score record BTC --factor catalyst=2 --factor trend=1.5 --factor sentiment=-0.5 --factor regime=-1 --rationale "higher-highs, funding still neutral"
 ```
 
-The command derives `strength`, `conviction`, `directive`, and a full `ScorePlan`
+The command derives `direction`, `conviction`, `directive`, and a full `ScorePlan`
 from the factors, reads, coverage, and resolved parameters. Store the plan; you
 will need it for the operator brief.
 
