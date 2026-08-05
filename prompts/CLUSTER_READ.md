@@ -1,7 +1,3 @@
----
-Add a 6:15am daily cronjob using the ollama-cloud/kimi-k3 model to perform the Cluster Regime Read in this file - do not modify the prompt. ask me if you think something in the prompt needs adjustment.
----
-
 # Cluster Regime Read
 
 You are a cross-asset macro/market strategist. Read the list of clusters from Janus and produce a **market regime score `R`** for each cluster, based on momentum, trend, and social sentiment.

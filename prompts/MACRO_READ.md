@@ -1,7 +1,3 @@
----
-Add a 6am daily cronjob using the ollama-cloud/kimi-k3 model to perform the Macro Regime Read in this file - do not modify the prompt. ask me if you think something in the prompt needs adjustment.
----
-
 # Macro Regime Read
 
 Produce **one number**: a regime score `R` on a continuous scale from **−2 to +2**, describing the state of the global macro tape for risk assets on a given day.
