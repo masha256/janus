@@ -77,7 +77,7 @@ test("a flagged asset scores, and strength/conviction/directive match the domain
     await withHarness(async (file) => {
         withDb(file, (db) => {
             recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
-            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
         });
         const result = (await handle("record", ["BTC", "--factor", "catalyst=2", "--factor", "trend=2", "--factor", "secular=2", "--factor", "crowding=50", "--factor", "divergence=0"]));
         assert.equal(result.directive, "STAND_ASIDE");
@@ -99,7 +99,7 @@ test("an asset with an open trade but no flag is in the queue as open_trade", as
     await withHarness(async (file) => {
         withDb(file, (db) => {
             recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
-            recordScreen(db, DATE, requireAssetBySymbol(db, "SOL").id, { flagged: false, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+            recordScreen(db, DATE, requireAssetBySymbol(db, "SOL").id, { flagged: false, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
             openTrade(db, "SOL", 2);
         });
         const queueResult = (await handle("queue", []));
@@ -113,7 +113,7 @@ test("re-scoring replaces the previous metric rows rather than merging them", as
     await withHarness(async (file) => {
         withDb(file, (db) => {
             recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
-            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
         });
         await handle("record", ["BTC", "--factor", "catalyst=2", "--factor", "trend=0", "--factor", "secular=0", "--factor", "crowding=50", "--factor", "divergence=1"]);
         await handle("record", ["BTC", "--factor", "catalyst=1", "--factor", "trend=0", "--factor", "secular=0", "--factor", "crowding=50", "--factor", "divergence=0"]);
@@ -136,8 +136,8 @@ test("score_at stamps only once every queued asset has been scored", async () =>
     await withHarness(async (file) => {
         withDb(file, (db) => {
             recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
-            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
-            recordScreen(db, DATE, requireAssetBySymbol(db, "SOL").id, { flagged: false, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
+            recordScreen(db, DATE, requireAssetBySymbol(db, "SOL").id, { flagged: false, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
             openTrade(db, "SOL", 1);
         });
         const first = (await handle("record", ["BTC", "--factor", "catalyst=1", "--factor", "crowding=50", "--factor", "trend=0", "--factor", "secular=0"]));
@@ -166,7 +166,7 @@ test("score show reprints a stored score without requiring factors", async () =>
     await withHarness(async (file) => {
         withDb(file, (db) => {
             recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
-            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
         });
         const recorded = (await handle("record", ["BTC", "--factor", "catalyst=2", "--factor", "trend=0", "--factor", "secular=0", "--factor", "crowding=50", "--factor", "divergence=0"]));
         const shown = (await handle("show", ["BTC"]));
@@ -184,7 +184,7 @@ test("score show fails if the asset was not scored today", async () => {
     await withHarness(async (file) => {
         withDb(file, (db) => {
             recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
-            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+            recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id, { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
         });
         await assert.rejects(() => handle("show", ["BTC"]), (e) => e.code === "NOT_FOUND");
     });

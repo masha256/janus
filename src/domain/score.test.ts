@@ -8,7 +8,7 @@ import type { Metrics } from "./metrics.ts";
 const flat: ScoreContext = {
   macro: { metrics: {}, results: {} },
   cluster: null,
-  screen: { flagged: false, metrics: { score: 1 }, results: { screen_score: 0.5, threshold: 1, regime: 0, regime_smile: 0 } },
+  screen: { flagged: false, metrics: { score: 1 }, results: { screen_score: 0.5, threshold: 4, regime: 0, regime_smile: 0 } },
   positions: [],
   asset: { symbol: "BTC", class: "crypto", cluster_id: null, coverage: null },
   session_date: "2026-07-31",
@@ -26,7 +26,7 @@ const ctx = (macroRegime: number, clusterRegime: number | null): ScoreContext =>
     metrics: { score: 5 },
     results: {
       screen_score: 5,
-      threshold: 1,
+      threshold: 4,
       regime: clusterRegime ?? macroRegime,
       regime_smile: 0.6 * (clusterRegime ?? macroRegime),
     },
@@ -189,7 +189,7 @@ test("screen confidence is not inherited when scoring confidence is absent", () 
     screen: {
       flagged: false,
       metrics: { score: 5, confidence: 1 }, // screen judged a different question at 1.0
-      results: { screen_score: 5, threshold: 1, regime: 0, regime_smile: 0 },
+      results: { screen_score: 5, threshold: 4, regime: 0, regime_smile: 0 },
     },
   };
   const got = deriveScore(metrics, withScreenConf, DEFAULT_PARAMS);
@@ -230,7 +230,7 @@ test("deriveScore requires a screen with regime and regime_smile", () => {
   assert.throws(
     () => deriveScore(
       m(2, 0, 0, 50, false, false),
-      { ...flat, screen: { flagged: false, metrics: { score: 1 }, results: { screen_score: 0.5, threshold: 1 } } },
+      { ...flat, screen: { flagged: false, metrics: { score: 1 }, results: { screen_score: 0.5, threshold: 4 } } },
       DEFAULT_PARAMS,
     ),
     /regime/,

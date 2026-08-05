@@ -14,7 +14,7 @@
  */
 export const DEFAULT_PARAMS: Record<string, number> = {
   beta_factor: 1.0,
-  screen_threshold: 1.0,
+  screen_threshold: 4.0,
   w_catalyst: 0.25,
   w_sentiment: 0.25,
   w_trend: 0.3,

@@ -337,7 +337,7 @@ test("--size auto and --stop auto use the score plan sizing", async () => {
       }]);
 
       recordScreen(db, DATE, assetId,
-        { flagged: true, rationale: null, metrics: { score: 8, confidence: 0.9 }, results: { screen_score: 7.2, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+        { flagged: true, rationale: null, metrics: { score: 8, confidence: 0.9 }, results: { screen_score: 7.2, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
 
       const YESTERDAY = "2026-07-30";
       ensureSession(db, YESTERDAY, NOW);
@@ -348,7 +348,7 @@ test("--size auto and --stop auto use the score plan sizing", async () => {
       stampPhase(db, YESTERDAY, "score", NOW);
       recordMacro(db, YESTERDAY, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
       recordScreen(db, YESTERDAY, assetId,
-        { flagged: true, rationale: null, metrics: { score: 8, confidence: 0.9 }, results: { screen_score: 7.2, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+        { flagged: true, rationale: null, metrics: { score: 8, confidence: 0.9 }, results: { screen_score: 7.2, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
       recordScore(db, YESTERDAY, assetId, {
         strength: 1.5,
         conviction: 9,
@@ -377,7 +377,7 @@ test("--size auto and --stop auto use the score plan sizing", async () => {
           cluster: null,
           screen: {
             metrics: { score: 8, confidence: 0.9 },
-            results: { screen_score: 7.2, threshold: 1, regime: 1.5, regime_smile: 0.9 },
+            results: { screen_score: 7.2, threshold: 4, regime: 1.5, regime_smile: 0.9 },
             flagged: true,
           },
           positions: [],

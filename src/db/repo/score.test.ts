@@ -43,9 +43,9 @@ function openTrade(db: ReturnType<typeof fresh>, symbol: string, units: number) 
 test("the queue is the union of flagged assets and open positions", () => {
   const db = fresh();
   recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-    { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
+    { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 4 } }, NOW);
   recordScreen(db, DATE, requireAssetBySymbol(db, "ETH").id,
-    { flagged: false, rationale: null, metrics: { score: 1, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
+    { flagged: false, rationale: null, metrics: { score: 1, confidence: 0 }, results: { screen_score: 0, threshold: 4 } }, NOW);
   openTrade(db, "SOL", 1);
 
   const queue = scoreQueue(db, DATE);
@@ -59,7 +59,7 @@ test("the queue is the union of flagged assets and open positions", () => {
 test("an asset both flagged and held reports reason both", () => {
   const db = fresh();
   recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-    { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1 } }, NOW);
+    { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 4 } }, NOW);
   openTrade(db, "BTC", 2);
   assert.equal(scoreQueue(db, DATE)[0]!.queue_reason, "both");
   db.close();

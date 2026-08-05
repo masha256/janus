@@ -36,7 +36,7 @@ function freshDbFile(): string {
   const asset = addAsset(db, "BTC", "crypto", null, null, NOW);
   recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
   recordScreen(db, DATE, asset.id,
-    { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+    { flagged: true, rationale: null, metrics: { score: 5, confidence: 0 }, results: { screen_score: 0, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
   db.close();
   return file;
 }

@@ -60,7 +60,7 @@ Only these metrics are required/allowed on the screen record:
 | `confidence` | `0..1` | Quality of the information behind the score. `0` = no information / entirely inferred, `0.5` = partial or noisy data, `1.0` = clean, current, directly observed data. Missing means zero. |
 
 `score` and `confidence` are multiplied to produce `screen_score`. The asset
-**flags** when `screen_score >= screen_threshold` (default `1.0`). A strong score
+**flags** when `screen_score >= screen_threshold` (default `4.0`). A strong score
 with low confidence can still fail to flag; a modest score with very high
 confidence can flag.
 

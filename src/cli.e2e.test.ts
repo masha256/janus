@@ -202,7 +202,7 @@ test("the full daily pipeline runs end to end", async () => {
   assert.equal(coverage.body.data.phase_complete, true);
 
   const screen = await janus(
-    "screen", "record", "XPL", "--metric", "score=5", "--metric", "confidence=0.5", "--metric", "rvol=2.1",
+    "screen", "record", "XPL", "--metric", "score=8", "--metric", "confidence=0.9", "--metric", "rvol=2.1",
   );
   assert.equal(screen.body.ok, true, JSON.stringify(screen.body));
   assert.equal(screen.body.data.flagged, true);
@@ -210,12 +210,12 @@ test("the full daily pipeline runs end to end", async () => {
   const screens = await janus("screen", "list");
   assert.deepEqual(
     screens.body.data.screens[0].metrics,
-    { confidence: 0.5, rvol: 2.1, score: 5 },
+    { confidence: 0.9, rvol: 2.1, score: 8 },
     "what was observed",
   );
   assert.deepEqual(
     screens.body.data.screens[0].results,
-    { screen_score: 2.5, threshold: 1, regime: 0.5, beta_factor: 1, regime_smile: 0.3 },
+    { screen_score: 7.2, threshold: 4, regime: 0.5, beta_factor: 1, regime_smile: 0.3 },
     "the derived screen_score, threshold, regime, beta_factor, and regime_smile in force",
   );
 

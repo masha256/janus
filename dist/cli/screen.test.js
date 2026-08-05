@@ -75,32 +75,32 @@ test("screening snapshots the threshold: a later retune does not rewrite history
             const asset = addAsset(db, "BTC", "crypto", null, null, NOW);
             upsertCoverage(db, DATE, [{ asset_id: asset.id, values: stubCoverage(100) }]);
         });
-        const first = (await handle("record", ["BTC", "--metric", "score=5", "--metric", "confidence=0.5"]));
-        assert.equal(first.results["screen_score"], 2.5);
-        assert.equal(first.results["threshold"], 1.0);
+        const first = (await handle("record", ["BTC", "--metric", "score=8", "--metric", "confidence=0.9"]));
+        assert.equal(first.results["screen_score"], 7.2);
+        assert.equal(first.results["threshold"], 4.0);
         assert.equal(first.results["regime_smile"], 0.6, "uses macro regime 1.0 for unclustered asset");
         assert.equal(first.flagged, true);
         // Retune the global default upward past the already-recorded screen_score.
-        withDb(file, (db) => setClusterParam(db, null, "screen_threshold", 5));
+        withDb(file, (db) => setClusterParam(db, null, "screen_threshold", 10));
         // The stored row must still carry the OLD threshold and OLD flag.
         withDb(file, (db) => {
             const rows = listScreen(db, DATE, {});
             assert.equal(rows.length, 1);
-            assert.equal(rows[0].results["threshold"], 1.0, "retuning must not rewrite the snapshotted threshold");
+            assert.equal(rows[0].results["threshold"], 4.0, "retuning must not rewrite the snapshotted threshold");
             assert.equal(rows[0].results["regime_smile"], 0.6, "retuning must not rewrite the snapshotted regime_smile");
             assert.equal(rows[0].flagged, 1, "retuning must not rewrite the snapshotted flag");
         });
         // Re-screening the same asset picks up the new threshold.
-        const second = (await handle("record", ["BTC", "--metric", "score=5", "--metric", "confidence=0.5"]));
-        assert.equal(second.results["threshold"], 5);
-        assert.equal(second.flagged, false, "2.5 no longer clears the retuned 5.0 threshold");
+        const second = (await handle("record", ["BTC", "--metric", "score=8", "--metric", "confidence=0.9"]));
+        assert.equal(second.results["threshold"], 10);
+        assert.equal(second.flagged, false, "7.2 no longer clears the retuned 10.0 threshold");
     });
 });
 test("cluster override reaches the flag decision", async () => {
     await withHarness(async (file) => {
         withDb(file, (db) => {
             const cluster = addCluster(db, "majors", "Majors", null, null, NOW);
-            setClusterParam(db, cluster.id, "screen_threshold", 5);
+            setClusterParam(db, cluster.id, "screen_threshold", 10);
             const btc = addAsset(db, "BTC", "crypto", "majors", null, NOW);
             const eth = addAsset(db, "ETH", "crypto", null, null, NOW);
             upsertCoverage(db, DATE, [
@@ -109,16 +109,16 @@ test("cluster override reaches the flag decision", async () => {
             ]);
             recordClusterRead(db, DATE, cluster.id, { metrics: { regime: -1.0 }, results: {} }, NOW);
         });
-        const btc = (await handle("record", ["BTC", "--metric", "score=5", "--metric", "confidence=0.5"]));
-        assert.equal(btc.results["threshold"], 5);
-        assert.equal(btc.results["screen_score"], 2.5);
+        const btc = (await handle("record", ["BTC", "--metric", "score=8", "--metric", "confidence=0.9"]));
+        assert.equal(btc.results["threshold"], 10);
+        assert.equal(btc.results["screen_score"], 7.2);
         assert.equal(btc.results["regime_smile"], -0.6, "uses cluster regime -1.0 for clustered asset");
-        assert.equal(btc.flagged, false, "2.5 is below the cluster's 5.0 threshold");
-        const eth = (await handle("record", ["ETH", "--metric", "score=5", "--metric", "confidence=0.5"]));
-        assert.equal(eth.results["threshold"], 1.0);
-        assert.equal(eth.results["screen_score"], 2.5);
+        assert.equal(btc.flagged, false, "7.2 is below the cluster's 10.0 threshold");
+        const eth = (await handle("record", ["ETH", "--metric", "score=8", "--metric", "confidence=0.9"]));
+        assert.equal(eth.results["threshold"], 4.0);
+        assert.equal(eth.results["screen_score"], 7.2);
         assert.equal(eth.results["regime_smile"], 0.6, "uses macro regime 1.0 for unclustered asset");
-        assert.equal(eth.flagged, true, "2.5 clears the default 1.0 threshold for an unclustered asset");
+        assert.equal(eth.flagged, true, "7.2 clears the default 4.0 threshold for an unclustered asset");
     });
 });
 test("screen_score equal to the threshold flags (inclusive boundary)", async () => {
@@ -127,8 +127,9 @@ test("screen_score equal to the threshold flags (inclusive boundary)", async () 
             const asset = addAsset(db, "BTC", "crypto", null, null, NOW);
             upsertCoverage(db, DATE, [{ asset_id: asset.id, values: stubCoverage(100) }]);
         });
-        const result = (await handle("record", ["BTC", "--metric", "score=2", "--metric", "confidence=0.5"]));
-        assert.equal(result.results["screen_score"], 1.0);
+        const result = (await handle("record", ["BTC", "--metric", "score=8", "--metric", "confidence=0.5"]));
+        assert.equal(result.results["screen_score"], 4.0);
+        assert.equal(result.results["threshold"], 4.0);
         assert.equal(result.flagged, true, "screen_score === threshold must flag, not require strictly greater");
     });
 });

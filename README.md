@@ -450,7 +450,7 @@ list` shows the global layer and the resolved result; `janus cluster show` does 
 for a cluster. An asset with no cluster resolves against `global_param` and the defaults.
 
 Defaults (`domain/params.ts` is the authority): `beta_factor 1.0`,
-`screen_threshold 1.0`, `w_catalyst 0.25`, `w_sentiment 0.25`, `w_trend 0.3`,
+`screen_threshold 4.0`, `w_catalyst 0.25`, `w_sentiment 0.25`, `w_trend 0.3`,
 `w_regime 0.15`, `w_secular 0.05`, `fear_premium 1.25`, `divergence_boost 0.5`,
 `min_history_bars 200`, plus all gate, sizing, and directive-plan parameters
 documented in the **Scoring gates**, **Position sizing**, and **Directive plans**
@@ -469,7 +469,7 @@ each parameter does; the table below is a compact reference.
 | Parameter | Scope | Default | Description |
 | --- | --- | --- | --- |
 | `beta_factor` | screen | `1.0` | Multiplier applied to the raw screen score before the threshold check. |
-| `screen_threshold` | screen | `1.0` | Minimum `screen_score` for an asset to be flagged for the scoring queue. |
+| `screen_threshold` | screen | `4.0` | Minimum `screen_score` for an asset to be flagged for the scoring queue. |
 | `w_catalyst` | score | `0.25` | Weight of the momentum/catalyst factor in `strength`. |
 | `w_sentiment` | score | `0.25` | Weight of the contrarian positioning/crowding factor in `strength`. |
 | `w_trend` | score | `0.30` | Weight of the trend/flow factor in `strength`. |

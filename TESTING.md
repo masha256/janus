@@ -65,7 +65,7 @@ janus cluster record crypto_defi      --metric regime=0.5
 
 ## 5. Screen all three assets
 
-A `score` of 5 with `confidence=1` and the default `screen_threshold=1.0` gives
+A `score` of 5 with `confidence=1` and the default `screen_threshold=4.0` gives
 `screen_score=5`, which flags the asset.
 
 ```bash

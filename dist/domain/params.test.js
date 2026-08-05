@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { DEFAULT_PARAMS, resolveParams } from "./params.js";
 test("defaults match the spec", () => {
     assert.equal(DEFAULT_PARAMS["beta_factor"], 1.0);
-    assert.equal(DEFAULT_PARAMS["screen_threshold"], 1.0);
+    assert.equal(DEFAULT_PARAMS["screen_threshold"], 4.0);
     assert.equal(DEFAULT_PARAMS["w_catalyst"], 0.25);
     assert.equal(DEFAULT_PARAMS["w_sentiment"], 0.25);
     assert.equal(DEFAULT_PARAMS["w_trend"], 0.3);

@@ -8,11 +8,11 @@ const cluster = (regime) => ({ metrics: { regime }, results: {} });
 test("screen_score is score * confidence", () => {
     const r = deriveScreen({ score: 5, confidence: 0.5 }, macro(0), null, params);
     assert.equal(r.results["screen_score"], 2.5);
-    assert.equal(r.results["threshold"], 1.0);
-    assert.equal(r.flagged, true);
+    assert.equal(r.results["threshold"], 4.0);
+    assert.equal(r.flagged, false);
 });
 test("flag requires screen_score to meet screen_threshold", () => {
-    const r = deriveScreen({ score: 2, confidence: 0.4 }, macro(0), null, resolveParams({}, { screen_threshold: 1.0 }));
+    const r = deriveScreen({ score: 2, confidence: 0.4 }, macro(0), null, resolveParams({}, { screen_threshold: 4.0 }));
     assert.equal(r.results["screen_score"], 0.8);
     assert.equal(r.flagged, false);
 });

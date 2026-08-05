@@ -86,7 +86,7 @@ test("a flagged asset scores, and strength/conviction/directive match the domain
     withDb(file, (db) => {
       recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
       recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-        { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+        { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
     });
 
     const result = (await handle("record", ["BTC", "--factor", "catalyst=2", "--factor", "trend=2", "--factor", "secular=2", "--factor", "crowding=50", "--factor", "divergence=0"])) as {
@@ -118,7 +118,7 @@ test("an asset with an open trade but no flag is in the queue as open_trade", as
     withDb(file, (db) => {
       recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
       recordScreen(db, DATE, requireAssetBySymbol(db, "SOL").id,
-        { flagged: false, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+        { flagged: false, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
       openTrade(db, "SOL", 2);
     });
 
@@ -143,7 +143,7 @@ test("re-scoring replaces the previous metric rows rather than merging them", as
     withDb(file, (db) => {
       recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
       recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-        { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+        { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
     });
 
     await handle("record", ["BTC", "--factor", "catalyst=2", "--factor", "trend=0", "--factor", "secular=0", "--factor", "crowding=50", "--factor", "divergence=1"]);
@@ -174,9 +174,9 @@ test("score_at stamps only once every queued asset has been scored", async () =>
     withDb(file, (db) => {
       recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
       recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-        { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+        { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
       recordScreen(db, DATE, requireAssetBySymbol(db, "SOL").id,
-        { flagged: false, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+        { flagged: false, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
       openTrade(db, "SOL", 1);
     });
 
@@ -210,7 +210,7 @@ test("score show reprints a stored score without requiring factors", async () =>
     withDb(file, (db) => {
       recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
       recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-        { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+        { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
     });
 
     const recorded = (await handle("record", ["BTC", "--factor", "catalyst=2", "--factor", "trend=0", "--factor", "secular=0", "--factor", "crowding=50", "--factor", "divergence=0"])) as {
@@ -241,7 +241,7 @@ test("score show fails if the asset was not scored today", async () => {
     withDb(file, (db) => {
       recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
       recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
-        { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 1, regime: 1.5, regime_smile: 0.9 } }, NOW);
+        { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
     });
 
     await assert.rejects(
