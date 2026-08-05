@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import {
   addCluster, listClusters, requireClusterByKey, setClusterParam,
-  getClusterParams, getGlobalParams, removeCluster,
+  getClusterParams, getGlobalParams, removeCluster, setClusterDescription,
 } from "../db/repo/cluster.ts";
 import { listAssets } from "../db/repo/asset.ts";
 import { recordClusterRead, listClusterReads, getMacro } from "../db/repo/phase.ts";
@@ -13,9 +13,9 @@ import { finite, metricPairs, readText, required, unknownVerb } from "./args.ts"
 import { JanusError } from "../output.ts";
 import { collect, type Emit, handler, withDb } from "./command.ts";
 
-const VERBS = "add, list, show, set-param, rm, record, reads";
+const VERBS = "add, list, show, set-description, set-param, rm, record, reads";
 
-type RecordOpts = { metric: string[]; date?: string; force?: boolean };
+type RecordOpts = { summary?: string; metric: string[]; date?: string; force?: boolean };
 
 export function build(emit: Emit): Command {
   const cmd = new Command("cluster")
@@ -28,11 +28,18 @@ export function build(emit: Emit): Command {
     .description("Create a cluster")
     .argument("[key]", "short key, e.g. majors")
     .option("--name <NAME>", "display name")
+    .option("--description <TEXT>", "one-line description; - reads stdin")
     .option("--notes <TEXT>", "free text; - reads stdin")
-    .action(async (key: string | undefined, opts: { name?: string; notes?: string }) =>
+    .action(async (key: string | undefined, opts: { name?: string; description?: string; notes?: string }) =>
       emit(await withDb((db) => addCluster(
-        db, required(key, "key"), required(opts.name, "name"), readText(opts.notes) ?? null, nowIso(),
+        db, required(key, "key"), required(opts.name, "name"), readText(opts.description) ?? null, readText(opts.notes) ?? null, nowIso(),
       ))));
+
+  cmd.command("set-description")
+    .description("Update a cluster's description")
+    .argument("[key]", "cluster key")
+    .option("--description <TEXT>", "one-line description; - reads stdin", collect)
+    .action(async (key: string | undefined, opts: { description?: string }) => emit(await setDescription(key, opts.description)));
 
   cmd.command("list")
     .description("List clusters — the roster, not the session's reads")
@@ -67,6 +74,7 @@ export function build(emit: Emit): Command {
   cmd.command("record")
     .description("Record this session's read of one cluster (phase 2)")
     .argument("[cluster]", "cluster key")
+    .option("--summary <TEXT>", "one line on the tape; - reads stdin")
     .option("--metric <KEY=VALUE>", "what the read observed; repeatable", collect)
     .option("--date <YYYY-MM-DD>", "address an existing session")
     .option("--force", "run out of phase order")
@@ -104,6 +112,18 @@ function setParam(
   });
 }
 
+function setDescription(key: string | undefined, description: string | undefined): Promise<unknown> {
+  return withDb((db) => {
+    const text = readText(description);
+    const cluster = setClusterDescription(db, required(key, "key"), text);
+    return {
+      cluster: cluster.key,
+      description: cluster.description,
+      updated: nowIso(),
+    };
+  });
+}
+
 function record(key: string | undefined, opts: RecordOpts): Promise<unknown> {
   return withDb((db) => {
     const now = nowIso();
@@ -116,6 +136,7 @@ function record(key: string | undefined, opts: RecordOpts): Promise<unknown> {
     const params = resolveParams(getClusterParams(db, cluster.id), getGlobalParams(db));
 
     recordClusterRead(db, session.session_date, cluster.id, {
+      summary: readText(opts.summary) ?? undefined,
       metrics,
       results: deriveClusterRead(metrics, { metrics: {}, results: {} }, params),
     }, now);

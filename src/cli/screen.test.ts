@@ -117,7 +117,7 @@ test("screening snapshots the threshold: a later retune does not rewrite history
 test("cluster override reaches the flag decision", async () => {
   await withHarness(async (file) => {
     withDb(file, (db) => {
-      const cluster = addCluster(db, "majors", "Majors", null, NOW);
+      const cluster = addCluster(db, "majors", "Majors", null, null, NOW);
       setClusterParam(db, cluster.id, "screen_threshold", 5);
       const btc = addAsset(db, "BTC", "crypto", "majors", null, NOW);
       const eth = addAsset(db, "ETH", "crypto", null, null, NOW);

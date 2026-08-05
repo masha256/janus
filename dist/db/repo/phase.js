@@ -29,9 +29,11 @@ export function recordClusterRead(db, date, clusterId, input, now) {
     const scope = { session_date: date, cluster_id: clusterId };
     db.exec("BEGIN");
     try {
-        db.prepare(`INSERT INTO cluster_read (session_date, cluster_id, recorded_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(session_date, cluster_id) DO UPDATE SET recorded_at = excluded.recorded_at`).run(date, clusterId, now);
+        db.prepare(`INSERT INTO cluster_read (session_date, cluster_id, summary, recorded_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(session_date, cluster_id) DO UPDATE SET
+         summary = excluded.summary,
+         recorded_at = excluded.recorded_at`).run(date, clusterId, input.summary ?? null, now);
         replaceMetrics(db, "cluster_read_metric", scope, input.metrics);
         replaceMetrics(db, "cluster_read_result", scope, input.results);
         db.exec("COMMIT");
@@ -51,7 +53,8 @@ export function getClusterRead(db, date, clusterId) {
 }
 export function listClusterReads(db, date) {
     const reads = db
-        .prepare(`SELECT cr.*, c.key AS cluster_key, c.name AS cluster_name
+        .prepare(`SELECT cr.session_date, cr.cluster_id, cr.summary, cr.recorded_at,
+              c.key AS cluster_key, c.name AS cluster_name
        FROM cluster_read cr JOIN cluster c ON c.id = cr.cluster_id
        WHERE cr.session_date = ? ORDER BY c.key`)
         .all(date);

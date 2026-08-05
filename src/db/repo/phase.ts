@@ -37,7 +37,7 @@ export function recordMacro(
 }
 
 export type MacroRead = {
-  read: { session_date: string; state: string; summary: string; recorded_at: string } | undefined;
+  read: { session_date: string; summary: string; recorded_at: string } | undefined;
   metrics: Metrics;
   results: Metrics;
 };
@@ -51,22 +51,28 @@ export function getMacro(db: DatabaseSync, date: string): MacroRead {
   };
 }
 
+export type ClusterInput = ReadInput & {
+  summary?: string;
+};
+
 /** The read row is bare — whatever was observed lands in metrics, the only derived result is regime_smile. */
 export function recordClusterRead(
   db: DatabaseSync,
   date: string,
   clusterId: number,
-  input: ReadInput,
+  input: ClusterInput,
   now: string,
 ): void {
   const scope = { session_date: date, cluster_id: clusterId };
   db.exec("BEGIN");
   try {
     db.prepare(
-      `INSERT INTO cluster_read (session_date, cluster_id, recorded_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(session_date, cluster_id) DO UPDATE SET recorded_at = excluded.recorded_at`,
-    ).run(date, clusterId, now);
+      `INSERT INTO cluster_read (session_date, cluster_id, summary, recorded_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(session_date, cluster_id) DO UPDATE SET
+         summary = excluded.summary,
+         recorded_at = excluded.recorded_at`,
+    ).run(date, clusterId, input.summary ?? null, now);
     replaceMetrics(db, "cluster_read_metric", scope, input.metrics);
     replaceMetrics(db, "cluster_read_result", scope, input.results);
     db.exec("COMMIT");
@@ -88,7 +94,8 @@ export function getClusterRead(db: DatabaseSync, date: string, clusterId: number
 export function listClusterReads(db: DatabaseSync, date: string): unknown[] {
   const reads = db
     .prepare(
-      `SELECT cr.*, c.key AS cluster_key, c.name AS cluster_name
+      `SELECT cr.session_date, cr.cluster_id, cr.summary, cr.recorded_at,
+              c.key AS cluster_key, c.name AS cluster_name
        FROM cluster_read cr JOIN cluster c ON c.id = cr.cluster_id
        WHERE cr.session_date = ? ORDER BY c.key`,
     )

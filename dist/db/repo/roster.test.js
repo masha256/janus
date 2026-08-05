@@ -43,16 +43,16 @@ test("addAsset rejects a duplicate symbol", () => {
 });
 test("an asset joins at most one cluster and reports its key", () => {
     const db = fresh();
-    addCluster(db, "majors", "Majors", null, NOW);
+    addCluster(db, "majors", "Majors", null, null, NOW);
     const a = addAsset(db, "BTC", "crypto", "majors", null, NOW);
     assert.equal(a.cluster_key, "majors");
-    addCluster(db, "alts", "Alts", null, NOW);
+    addCluster(db, "alts", "Alts", null, null, NOW);
     assert.equal(updateAsset(db, "BTC", { clusterKey: "alts" }).cluster_key, "alts");
     db.close();
 });
 test("removing a cluster detaches its assets rather than deleting them", () => {
     const db = fresh();
-    addCluster(db, "majors", "Majors", null, NOW);
+    addCluster(db, "majors", "Majors", null, null, NOW);
     addAsset(db, "BTC", "crypto", "majors", null, NOW);
     removeCluster(db, "majors");
     assert.equal(requireAssetBySymbol(db, "BTC").cluster_id, null);
@@ -60,7 +60,7 @@ test("removing a cluster detaches its assets rather than deleting them", () => {
 });
 test("cluster params fall back to global", () => {
     const db = fresh();
-    const c = addCluster(db, "majors", "Majors", null, NOW);
+    const c = addCluster(db, "majors", "Majors", null, null, NOW);
     setClusterParam(db, c.id, "w_catalyst", 2);
     setClusterParam(db, null, "w_sentiment", 0.5);
     assert.deepEqual(getClusterParams(db, c.id), { w_catalyst: 2 });
@@ -70,7 +70,7 @@ test("cluster params fall back to global", () => {
 });
 test("setClusterParam overwrites an existing value", () => {
     const db = fresh();
-    const c = addCluster(db, "majors", "Majors", null, NOW);
+    const c = addCluster(db, "majors", "Majors", null, null, NOW);
     setClusterParam(db, c.id, "w_catalyst", 2);
     setClusterParam(db, c.id, "w_catalyst", 1.5);
     assert.deepEqual(getClusterParams(db, c.id), { w_catalyst: 1.5 });
@@ -97,7 +97,7 @@ test("eligibleAssets still includes an ineligible asset that holds an open trade
 });
 test("listAssets filters by active, class, and cluster", () => {
     const db = fresh();
-    addCluster(db, "majors", "Majors", null, NOW);
+    addCluster(db, "majors", "Majors", null, null, NOW);
     addAsset(db, "BTC", "crypto", "majors", null, NOW);
     addAsset(db, "ETH", "crypto", null, null, NOW);
     setAssetActive(db, "ETH", false);

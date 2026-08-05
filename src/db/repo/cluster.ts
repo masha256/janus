@@ -5,6 +5,7 @@ export type ClusterRow = {
   id: number;
   key: string;
   name: string;
+  description: string | null;
   notes: string | null;
   created_at: string;
 };
@@ -13,15 +14,26 @@ export function addCluster(
   db: DatabaseSync,
   key: string,
   name: string,
+  description: string | null,
   notes: string | null,
   now: string,
 ): ClusterRow {
   if (getClusterByKey(db, key) !== undefined) {
     throw new JanusError("ALREADY_EXISTS", `cluster ${key} already exists`);
   }
-  db.prepare("INSERT INTO cluster (key, name, notes, created_at) VALUES (?, ?, ?, ?)").run(
-    key, name, notes, now,
+  db.prepare("INSERT INTO cluster (key, name, description, notes, created_at) VALUES (?, ?, ?, ?, ?)").run(
+    key, name, description, notes, now,
   );
+  return requireClusterByKey(db, key);
+}
+
+export function setClusterDescription(
+  db: DatabaseSync,
+  key: string,
+  description: string | null | undefined,
+): ClusterRow {
+  const row = requireClusterByKey(db, key);
+  db.prepare("UPDATE cluster SET description = ? WHERE id = ?").run(description ?? null, row.id);
   return requireClusterByKey(db, key);
 }
 

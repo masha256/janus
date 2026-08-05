@@ -4,6 +4,7 @@ CREATE TABLE cluster (
   id          INTEGER PRIMARY KEY,
   key         TEXT NOT NULL UNIQUE,
   name        TEXT NOT NULL,
+  description TEXT,
   notes       TEXT,
   created_at  TEXT NOT NULL
 );
@@ -52,7 +53,6 @@ CREATE TABLE session (
 
 CREATE TABLE macro_read (
   session_date  TEXT PRIMARY KEY REFERENCES session(session_date) ON DELETE CASCADE,
-  state         TEXT NOT NULL DEFAULT 'NEUTRAL' CHECK (state IN ('RISK_ON','NEUTRAL','RISK_OFF')),
   summary       TEXT NOT NULL,
   recorded_at   TEXT NOT NULL
 );
@@ -78,6 +78,7 @@ CREATE TABLE macro_read_result (
 CREATE TABLE cluster_read (
   session_date  TEXT NOT NULL REFERENCES session(session_date) ON DELETE CASCADE,
   cluster_id    INTEGER NOT NULL REFERENCES cluster(id) ON DELETE CASCADE,
+  summary       TEXT,
   recorded_at   TEXT NOT NULL,
   PRIMARY KEY (session_date, cluster_id)
 );
@@ -130,6 +131,8 @@ CREATE TABLE screen (
   asset_id      INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
   flagged       INTEGER NOT NULL,
   rationale     TEXT,
+  binary_date   TEXT,
+  binary_reason TEXT,
   recorded_at   TEXT NOT NULL,
   PRIMARY KEY (session_date, asset_id)
 );
@@ -207,6 +210,8 @@ CREATE TABLE trade (
   thesis              TEXT,
   origin_session_date TEXT,
   closed_on           TEXT,
+  target_price        REAL,
+  add_window_open     INTEGER NOT NULL DEFAULT 0,
   created_at          TEXT NOT NULL
 );
 
@@ -225,30 +230,14 @@ CREATE TABLE trade_unit (
   status       TEXT NOT NULL CHECK (status IN ('open','closed')),
   exit_on      TEXT,
   exit_price   REAL,
+  funding      REAL DEFAULT 0,
+  tag          TEXT,
+  partial_exited INTEGER NOT NULL DEFAULT 0,
+  breakeven_moved_at TEXT,
+  time_stop_date TEXT,
   notes        TEXT,
   UNIQUE (trade_id, seq)
 );
-`,
-    // Add funding and tag to trade_unit. Funding is measured at exit, not
-    // forecast at entry, and folds into Net R. Tag lets the directive ladder
-    // target specific units (runner, core) in its trim/stop plans.
-    `ALTER TABLE trade_unit ADD COLUMN funding REAL DEFAULT 0;
-ALTER TABLE trade_unit ADD COLUMN tag TEXT;`,
-    // A screen can flag a known binary event. Scoring reads it to enforce a
-    // no-entry cooldown until the event date passes.
-    `ALTER TABLE screen ADD COLUMN binary_date TEXT;
-ALTER TABLE screen ADD COLUMN binary_reason TEXT;`,
-    // Position sizing and stop-ladder support.
-    // partial_exited: whether this unit has already been partially trimmed.
-    // breakeven_moved_at: when stop was moved to breakeven or better.
-    // time_stop_date: computed deadline for the time-stop rule.
-    // target_price: optional target used to decide if time-stop is triggered.
-    // add_window_open: allows pyramiding only after a partial exit banks profit.
-    `ALTER TABLE trade_unit ADD COLUMN partial_exited INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE trade_unit ADD COLUMN breakeven_moved_at TEXT;
-ALTER TABLE trade_unit ADD COLUMN time_stop_date TEXT;
-ALTER TABLE trade ADD COLUMN target_price REAL;
-ALTER TABLE trade ADD COLUMN add_window_open INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE trade_event (
   id            INTEGER PRIMARY KEY,
@@ -264,7 +253,8 @@ CREATE TABLE trade_event (
   r_multiple    REAL,
   reason        TEXT,
   recorded_at   TEXT NOT NULL
-);`,
+);
+`,
 ];
 export function migrate(db) {
     const row = db.prepare("PRAGMA user_version").get();

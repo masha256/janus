@@ -40,7 +40,7 @@ test("foreign keys cascade from session to its phase rows", () => {
     migrate(db);
     db.exec(`
     INSERT INTO session (session_date,opened_at) VALUES ('2026-07-31','2026-07-31T00:00:00Z');
-    INSERT INTO macro_read VALUES ('2026-07-31','NEUTRAL','flat','2026-07-31T00:00:00Z');
+    INSERT INTO macro_read VALUES ('2026-07-31','flat','2026-07-31T00:00:00Z');
   `);
     db.exec("DELETE FROM session WHERE session_date='2026-07-31'");
     const rows = db.prepare("SELECT COUNT(*) AS n FROM macro_read").get();

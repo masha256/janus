@@ -1,9 +1,14 @@
 import { JanusError } from "../../output.js";
-export function addCluster(db, key, name, notes, now) {
+export function addCluster(db, key, name, description, notes, now) {
     if (getClusterByKey(db, key) !== undefined) {
         throw new JanusError("ALREADY_EXISTS", `cluster ${key} already exists`);
     }
-    db.prepare("INSERT INTO cluster (key, name, notes, created_at) VALUES (?, ?, ?, ?)").run(key, name, notes, now);
+    db.prepare("INSERT INTO cluster (key, name, description, notes, created_at) VALUES (?, ?, ?, ?, ?)").run(key, name, description, notes, now);
+    return requireClusterByKey(db, key);
+}
+export function setClusterDescription(db, key, description) {
+    const row = requireClusterByKey(db, key);
+    db.prepare("UPDATE cluster SET description = ? WHERE id = ?").run(description ?? null, row.id);
     return requireClusterByKey(db, key);
 }
 export function listClusters(db) {

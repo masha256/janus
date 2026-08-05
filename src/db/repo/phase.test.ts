@@ -28,7 +28,7 @@ test("recordMacro stores the read, its metrics, and its results", () => {
   const db = fresh();
   recordMacro(db, DATE, macro, NOW);
   const got = getMacro(db, DATE);
-  assert.equal(got.read!.state, "NEUTRAL");
+  assert.equal(got.read!.summary, "breadth improving");
   assert.deepEqual(got.metrics, { regime: 1.5, vix: 14.2, dxy: 99.1 });
   assert.deepEqual(got.results, {});
   db.close();
@@ -46,7 +46,7 @@ test("re-recording a macro replaces the previous slice entirely", () => {
 
 test("recordClusterRead is keyed per cluster and overwrites on re-run", () => {
   const db = fresh();
-  const c = addCluster(db, "majors", "Majors", null, NOW);
+  const c = addCluster(db, "majors", "Majors", null, null, NOW);
   recordClusterRead(db, DATE, c.id,
     { metrics: { breadth: 0.7 }, results: { regime_smile: 0.9 } }, NOW);
   recordClusterRead(db, DATE, c.id,
@@ -65,7 +65,7 @@ test("recordClusterRead is keyed per cluster and overwrites on re-run", () => {
 
 test("metrics and results cascade away with the read they belong to", () => {
   const db = fresh();
-  const c = addCluster(db, "majors", "Majors", null, NOW);
+  const c = addCluster(db, "majors", "Majors", null, null, NOW);
   recordMacro(db, DATE, macro, NOW);
   recordClusterRead(db, DATE, c.id,
     { metrics: { breadth: 0.7 }, results: { regime_smile: 0.9 } }, NOW);

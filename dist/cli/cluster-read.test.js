@@ -21,7 +21,7 @@ function freshDbFile() {
     ensureSession(db, DATE, NOW);
     recordMacro(db, DATE, { metrics: { regime: 0.5 }, results: {}, summary: "neutral" }, NOW);
     stampPhase(db, DATE, "macro", NOW);
-    addCluster(db, "majors", "Majors", null, NOW);
+    addCluster(db, "majors", "Majors", null, null, NOW);
     db.close();
     return file;
 }
@@ -51,7 +51,7 @@ test("cluster record stores whatever metrics the caller supplies", async () => {
 test("cluster with no verb names every verb, roster and phase alike", async () => {
     await withHarness(async () => {
         await assert.rejects(() => handle(undefined, []), (e) => e.code === "VALIDATION" &&
-            e.message === "cluster requires a verb; try: add, list, show, set-param, rm, record, reads");
+            e.message === "cluster requires a verb; try: add, list, show, set-description, set-param, rm, record, reads");
     });
 });
 // `list` is the roster listing, `reads` the session's reads: the merge must not

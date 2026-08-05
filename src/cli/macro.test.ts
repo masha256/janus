@@ -46,7 +46,7 @@ test("zero clusters: a macro record vacuously completes cluster_read too", async
 test("with a cluster present, a macro record does NOT stamp cluster_read", async () => {
   const file = freshDbFile();
   const db0 = openDb(file);
-  addCluster(db0, "majors", "Majors", null, NOW);
+  addCluster(db0, "majors", "Majors", null, null, NOW);
   db0.close();
   process.env["JANUS_DB"] = file;
   try {
@@ -74,9 +74,9 @@ test("--metric regime=-2 records a bearish macro", async () => {
   try {
     const result = (await handle("record", [
       "--date", DATE, "--metric", "regime=-2", "--summary", "risk off",
-    ])) as { read: { state: string }; metrics: Record<string, number>; results: Record<string, number> };
+    ])) as { read: { summary: string }; metrics: Record<string, number>; results: Record<string, number> };
     assert.equal(result.metrics["regime"], -2);
-    assert.equal(result.read.state, "NEUTRAL");
+    assert.equal(result.read.summary, "risk off");
     assert.deepEqual(result.results, {});
   } finally {
     delete process.env["JANUS_DB"];
