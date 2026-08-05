@@ -89,3 +89,7 @@ export function removeCluster(db: DatabaseSync, key: string): void {
   const row = requireClusterByKey(db, key);
   db.prepare("DELETE FROM cluster WHERE id = ?").run(row.id);
 }
+
+export function removeGlobalParam(db: DatabaseSync, key: string): void {
+  db.prepare("DELETE FROM global_param WHERE key = ?").run(key);
+}

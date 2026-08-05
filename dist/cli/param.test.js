@@ -94,8 +94,19 @@ test("a global param reaches the scoring decision for an unclustered asset", asy
         assert.equal(after.results["w_trend"], 3, "the global rung now feeds deriveScore");
     });
 });
+test("param rm removes a global override so the default resumes", async () => {
+    await withHarness(async () => {
+        await handle("set", ["beta_factor", "1.8"]);
+        const withOverride = (await handle("list", []));
+        assert.equal(withOverride.resolved["beta_factor"], 1.8);
+        await handle("rm", ["beta_factor"]);
+        const after = (await handle("list", []));
+        assert.deepEqual(after.global, {}, "global override removed");
+        assert.equal(after.resolved["beta_factor"], DEFAULT_PARAMS["beta_factor"], "default resumes");
+    });
+});
 test("param with no verb names the verbs instead of quoting undefined", async () => {
     await withHarness(async () => {
-        await assert.rejects(() => handle(undefined, []), (e) => e.code === "VALIDATION" && e.message === "param requires a verb; try: set, list");
+        await assert.rejects(() => handle(undefined, []), (e) => e.code === "VALIDATION" && e.message === "param requires a verb; try: set, rm, list");
     });
 });

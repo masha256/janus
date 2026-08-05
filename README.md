@@ -511,6 +511,7 @@ janus cluster set-param <key> <param> <value>
 janus cluster rm <key>
 
 janus param set <key> <value>                       write a global parameter
+janus param rm <key>                                remove override, resume default
 janus param list                                    global params over defaults
 
 janus asset add <symbol> --class CLASS [--cluster KEY] [--notes -]

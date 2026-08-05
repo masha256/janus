@@ -50,3 +50,6 @@ export function removeCluster(db, key) {
     const row = requireClusterByKey(db, key);
     db.prepare("DELETE FROM cluster WHERE id = ?").run(row.id);
 }
+export function removeGlobalParam(db, key) {
+    db.prepare("DELETE FROM global_param WHERE key = ?").run(key);
+}

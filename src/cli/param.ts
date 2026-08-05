@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { setClusterParam, getGlobalParams } from "../db/repo/cluster.ts";
+import { setClusterParam, getGlobalParams, removeGlobalParam } from "../db/repo/cluster.ts";
 import { resolveParams } from "../domain/params.ts";
 import { finite, required, unknownVerb } from "./args.ts";
 import { type Emit, handler, withDb } from "./command.ts";
@@ -14,7 +14,7 @@ export function build(emit: Emit): Command {
     .description("Global parameters, the middle rung of the resolution chain")
     // passThroughOptions on the positional-value verbs needs this on the parent.
     .enablePositionalOptions()
-    .action(() => { throw unknownVerb(undefined, "param", "set, list"); });
+    .action(() => { throw unknownVerb(undefined, "param", "set, rm, list"); });
 
   cmd.command("set")
     .description("Write a global parameter")
@@ -24,6 +24,11 @@ export function build(emit: Emit): Command {
     // passThroughOptions is what stops commander reading `-2` as an option.
     .passThroughOptions()
     .action(async (key?: string, value?: string) => emit(await set(key, value)));
+
+  cmd.command("rm")
+    .description("Remove a global parameter override so the default resumes")
+    .argument("[key]", "parameter name")
+    .action(async (key?: string) => emit(await rm(key)));
 
   cmd.command("list")
     .description("Show the global layer and the values it resolves to")
@@ -36,6 +41,13 @@ function set(key: string | undefined, value: string | undefined): Promise<unknow
   return withDb((db) => {
     setClusterParam(db, null, required(key, "key"), finite(value, "value"));
     return { params: getGlobalParams(db) };
+  });
+}
+
+function rm(key: string | undefined): Promise<unknown> {
+  return withDb((db) => {
+    removeGlobalParam(db, required(key, "key"));
+    return { removed: key, params: getGlobalParams(db) };
   });
 }
 
