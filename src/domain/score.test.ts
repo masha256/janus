@@ -237,6 +237,30 @@ test("deriveScore requires a screen with regime and regime_smile", () => {
   );
 });
 
+test("a quiet second day still INITIATES when trend and sentiment persist", () => {
+  // Day 1: real catalyst drives a flag and a strong score, but persistence fails.
+  const day1: import("./score.ts").ScoreResult = {
+    direction: 1.2, conviction: 8, directive: "STAND_ASIDE",
+    plan: {
+      directive: "STAND_ASIDE", reason: "prior signal", size_tier: "blocked",
+      signal_gate: "pass", persistence_gate: "fail", trend_gate: "pass",
+      binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a",
+    },
+    results: {},
+  };
+  // Day 2: no fresh headline, but yesterday's catalyst is still driving flow
+  // (1.0), the trend is still strong, and sentiment is slightly fearful.
+  // With signal_direction_initiate = 0.9 and the persistence rule satisfied,
+  // this must INITIATE rather than stand aside.
+  const got = deriveScore(
+    m(1.0, 2, 0.5, 35, false, false),
+    ctxWithPosition({ side: null, units: 0 }, coverage(), day1),
+    DEFAULT_PARAMS,
+  );
+  assert.equal(got.directive, "INITIATE", `expected INITIATE, got ${got.directive}`);
+  assert.equal(got.plan.persistence_gate, "pass");
+});
+
 test("top-down alignment uses regime_smile", () => {
   // With catalyst/trend/secular flat and regime the only live weight, direction is regime_smile.
   // Regime 1.5 -> regime_smile 0.9, so direction is positive and aligns with it.

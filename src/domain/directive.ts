@@ -48,7 +48,7 @@ export type ScorePlan = {
   regime_trigger?: "none" | "extreme_bull" | "extreme_bear";
 
   /** Did a persistence/anti-flip-flop rule modify the raw ladder output? */
-  persistence_rule?: "fresh_signal" | "maintain";
+  persistence_rule?: "fresh_signal" | "persisted" | "maintain";
 
   /** Direction of a new position, if any. Sizing is out of scope. */
   entry_plan?: {

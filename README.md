@@ -291,7 +291,7 @@ HOLD/EXIT/TRIM directives still carry the gate status for observability.
 
 | Parameter | Gate | Default | Description |
 | --- | --- | --- | --- |
-| `signal_direction_initiate` | signalGate | `1.0` | Minimum `\|direction\|` for a flat asset to pass the signal gate. |
+| `signal_direction_initiate` | signalGate | `0.9` | Minimum `\|direction\|` for a flat asset to pass the signal gate. |
 | `signal_conviction_initiate` | signalGate | `6` | Minimum `conviction` for a flat asset to pass the signal gate. |
 | `signal_direction_add` | signalGate | `1.0` | Minimum `\|direction\|` for an aligned position to pass the signal gate for adding. |
 | `signal_conviction_add` | signalGate | `7` | Minimum `conviction` for an aligned position to pass the signal gate for adding. |
@@ -347,10 +347,13 @@ moving parts: the **directive**, the **size tier**, and sub-plans for **entry**,
 | `EXIT` | Close the entire position. |
 
 The directive starts from the gates and current position state, then the
-**persistence rule** may downgrade a fresh `EXIT`/`TRIM` or a fresh `INITIATE` if
-there is no actionable new signal. A signal is actionable when the screen notes
-`capitulation` or `divergence`, when `\|catalyst\| ≥ actionable_catalyst_min`, or
-when `\|direction - previous_direction\| ≥ actionable_direction_delta`.
+**persistence rule** resists flip-flopping. It may downgrade a fresh `EXIT` or
+`TRIM` from a prior `HOLD`/`ADD` when there is no actionable new signal. A fresh
+`INITIATE` from `STAND_ASIDE` is allowed when the persistence gate passed — the
+second (or later) strong day is itself the confirmation. A signal is actionable
+when the screen notes `capitulation` or `divergence`, when `\|catalyst\| ≥
+actionable_catalyst_min`, or when `\|direction - previous_direction\| ≥
+actionable_direction_delta`.
 
 ### Regime triggers
 

@@ -99,12 +99,15 @@ export function deriveScore(metrics, context, params) {
     const ownPosition = matchedPosition === undefined
         ? { side: null, units: 0 }
         : { side: matchedPosition.side, units: matchedPosition.units };
-    const { plan, sizingPlan } = derivePlan(direction, conviction, ownPosition, context, catalyst, params);
+    // The stored/displayed conviction is an integer 1..10; the ladder should
+    // work with that same rounded value so gates and the final score agree.
+    const roundedConviction = Math.round(conviction);
+    const { plan, sizingPlan } = derivePlan(direction, roundedConviction, ownPosition, context, catalyst, params);
     if (sizingPlan)
         plan.sizing_plan = sizingPlan;
     return {
         direction,
-        conviction: Math.round(conviction),
+        conviction: roundedConviction,
         directive: plan.directive,
         plan,
         results: {
@@ -434,17 +437,21 @@ function derivePlan(direction, conviction, position, context, catalyst, params) 
             }
         }
         else if (prev === "STAND_ASIDE" && curr === "INITIATE") {
-            if (sizeTier === "blocked" || !actionableNewSignal(direction, catalyst, context, previousScore, params)) {
+            // The persistence gate already required the signal to persist for signal_persist_days.
+            // If it passed, the second (or later) strong day is itself the confirmation;
+            // do not demand a fresh catalyst on top of that. Only block if the gate failed
+            // or the size tier is blocked.
+            if (sizeTier === "blocked" || plan.persistence_gate === "fail") {
                 plan = {
                     ...plan,
                     directive: "STAND_ASIDE",
-                    reason: `${plan.reason} (persistence: no actionable new signal)`,
+                    reason: `${plan.reason} (persistence: signal has not persisted)`,
                     persistence_rule: "maintain",
                     entry_plan: undefined,
                 };
             }
             else {
-                plan = { ...plan, persistence_rule: "fresh_signal" };
+                plan = { ...plan, persistence_rule: "persisted" };
             }
         }
     }

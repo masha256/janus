@@ -4,7 +4,7 @@ const boolParam = (params, key) => (params[key] ?? 0) !== 0;
 export function signalGate(direction, conviction, position, params) {
     const absDirection = Math.abs(direction);
     const side = direction > 0 ? "long" : direction < 0 ? "short" : null;
-    const directionInitiate = params["signal_direction_initiate"] ?? 1.0;
+    const directionInitiate = params["signal_direction_initiate"] ?? 0.9;
     const convInitiate = params["signal_conviction_initiate"] ?? 6;
     const directionAdd = params["signal_direction_add"] ?? 1.0;
     const convAdd = params["signal_conviction_add"] ?? 7;
@@ -30,7 +30,7 @@ export function persistenceGate(direction, conviction, side, recentScores, param
         // Need at least N-1 prior scores plus today; without them the signal has not persisted.
         return "fail";
     }
-    const directionInitiate = params["signal_direction_initiate"] ?? 1.0;
+    const directionInitiate = params["signal_direction_initiate"] ?? 0.9;
     const convInitiate = params["signal_conviction_initiate"] ?? 6;
     // Walk backwards through recent scores (newest first). Count consecutive days
     // where the same-side signal would have passed the initiate threshold.

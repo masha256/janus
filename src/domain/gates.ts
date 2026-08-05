@@ -15,7 +15,7 @@ export function signalGate(
 ): ScorePlan["signal_gate"] {
   const absDirection = Math.abs(direction);
   const side: "long" | "short" | null = direction > 0 ? "long" : direction < 0 ? "short" : null;
-  const directionInitiate = params["signal_direction_initiate"] ?? 1.0;
+  const directionInitiate = params["signal_direction_initiate"] ?? 0.9;
   const convInitiate = params["signal_conviction_initiate"] ?? 6;
   const directionAdd = params["signal_direction_add"] ?? 1.0;
   const convAdd = params["signal_conviction_add"] ?? 7;
@@ -50,7 +50,7 @@ export function persistenceGate(
     return "fail";
   }
 
-  const directionInitiate = params["signal_direction_initiate"] ?? 1.0;
+  const directionInitiate = params["signal_direction_initiate"] ?? 0.9;
   const convInitiate = params["signal_conviction_initiate"] ?? 6;
 
   // Walk backwards through recent scores (newest first). Count consecutive days

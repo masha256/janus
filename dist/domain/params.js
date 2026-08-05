@@ -25,7 +25,7 @@ export const DEFAULT_PARAMS = {
     min_history_bars: 200,
     max_units: 3,
     // signalGate — direction and conviction thresholds.
-    signal_direction_initiate: 1.0,
+    signal_direction_initiate: 0.9,
     signal_conviction_initiate: 6,
     signal_direction_add: 1.0,
     signal_conviction_add: 7,

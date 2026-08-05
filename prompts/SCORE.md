@@ -95,8 +95,21 @@ Examples:
 - Negative: hack/exploit, key departure, regulatory action, earnings miss,
   exchange delisting, major holder selling.
 
-If there is no catalyst today, record **0**. Do not use trend or sentiment as a
-proxy for catalyst.
+If there is no *new* catalyst today, record the **most recent still-relevant**
+catalyst, decayed to a smaller magnitude. A catalyst remains relevant while its
+market impact is still observable: follow-through volume, ongoing inflows from a
+recent launch, a regulatory theme still unfolding, or a post-earnings drift that
+has not yet priced in.
+
+| Age / freshness | Score |
+| --- | --- |
+| New today, major | +1.5 / −1.5 to +2.0 / −2.0 |
+| New today, ordinary | +0.5 / −0.5 to +1.0 / −1.0 |
+| 1–2 days old, still driving flow | +0.5 / −0.5 to +1.0 / −1.0 |
+| Older or faded | 0 |
+
+Do not use trend or sentiment as a proxy for catalyst. If the only thing that
+changed is price or positioning, record **0**.
 
 ### Trend (−2..+2)
 
