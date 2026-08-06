@@ -10,8 +10,6 @@ export type UnitRow = {
   tag: string | null;
   // Sizing / ladder fields (optional for backwards compatibility).
   partial_exited?: number;
-  breakeven_moved_at?: string | null;
-  time_stop_date?: string | null;
 };
 
 export type TradeSummary = {

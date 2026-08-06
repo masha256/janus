@@ -257,6 +257,16 @@ CREATE TABLE trade_event (
   recorded_at   TEXT NOT NULL
 );
 `,
+  // Four columns were added to the baseline schema and never read. partial_exited
+  // is the only one the stop ladder actually uses, so the rest go. MIGRATIONS[0]
+  // is left alone: a fresh database creates them and this drops them, landing in
+  // the same state as a database that predates the ladder work.
+  `
+ALTER TABLE trade DROP COLUMN target_price;
+ALTER TABLE trade DROP COLUMN add_window_open;
+ALTER TABLE trade_unit DROP COLUMN breakeven_moved_at;
+ALTER TABLE trade_unit DROP COLUMN time_stop_date;
+`,
 ];
 
 export function migrate(db: DatabaseSync): number {
