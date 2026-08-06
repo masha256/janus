@@ -1,10 +1,10 @@
 import { Command } from "commander";
 import { requireAssetBySymbol, requireSymbols } from "../db/repo/asset.ts";
-import { openTrade, addUnit, setStop, exitUnits, getTrade, listTrades } from "../db/repo/trade.ts";
+import { openTrade, addUnit, setStop, exitUnits, partialExitUnit, getTrade, listTrades } from "../db/repo/trade.ts";
 import { getSession } from "../db/repo/session.ts";
 import { latestCoverage, getCoverage } from "../db/repo/coverage.ts";
 import { todayNY, nowIso } from "../domain/session.ts";
-import { csv, num, oneOf, positive, readText, required, unknownVerb } from "./args.ts";
+import { csv, finite, num, oneOf, positive, readText, required, unknownVerb } from "./args.ts";
 import { type Emit, handler, withDb } from "./command.ts";
 import { JanusError } from "../output.ts";
 import { getScore } from "../db/repo/score.ts";
@@ -26,7 +26,7 @@ type OpenOpts = {
 };
 type UnitOpts = { price?: string; stop?: string; risk?: string; notional?: string; size?: string; date?: string; tag?: string };
 type StopOpts = { stop?: string; unit?: string };
-type ExitOpts = { price?: string; unit?: string; date?: string; funding?: string };
+type ExitOpts = { price?: string; unit?: string; date?: string; funding?: string; fraction?: string };
 
 function tradeId(raw: string | undefined): number {
   const id = Number(required(raw, "trade_id"));
@@ -91,6 +91,7 @@ export function build(emit: Emit): Command {
     .option("--unit <SEQ>", "restrict to one unit")
     .option("--funding <N>", "funding paid/received over the hold; negative = cost")
     .option("--date <YYYY-MM-DD>", "the real exit date")
+    .option("--fraction <N>", "bank only this fraction of one unit, 0 < N < 1; requires --unit")
     .action(async (id: string | undefined, opts: ExitOpts) => emit(await exit(id, opts)));
 
   cmd.command("list")
@@ -215,8 +216,26 @@ function stop(raw: string | undefined, opts: StopOpts): Promise<unknown> {
 function exit(raw: string | undefined, opts: ExitOpts): Promise<unknown> {
   return withDb((db) => {
     const id = tradeId(raw);
-    const funding = opts.funding === undefined ? undefined : num(opts.funding, "funding", -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
-    const res = exitUnits(db, id, positive(opts.price, "price"), opts.date ?? todayNY(), unitSeq(opts.unit), funding);
+    const funding = opts.funding === undefined
+      ? undefined
+      : num(opts.funding, "funding", -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+    const price = positive(opts.price, "price");
+    const on = opts.date ?? todayNY();
+    const seq = unitSeq(opts.unit);
+
+    if (opts.fraction !== undefined) {
+      if (seq === undefined) {
+        throw new JanusError("VALIDATION", "--fraction requires --unit: it banks part of one unit");
+      }
+      const fraction = finite(opts.fraction, "fraction");
+      if (fraction === 1) {
+        throw new JanusError("VALIDATION", "--fraction 1 closes the unit; use exit without --fraction");
+      }
+      const res = partialExitUnit(db, id, seq, price, on, fraction, funding);
+      return { partial: true, ...res, ...(getTrade(db, id) as object) };
+    }
+
+    const res = exitUnits(db, id, price, on, seq, funding);
     return { ...res, ...(getTrade(db, id) as object) };
   });
 }
