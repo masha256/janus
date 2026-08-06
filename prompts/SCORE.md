@@ -259,6 +259,140 @@ janus score record UNI --date $TODAY \
   --rationale "price below 20-day with token unlock next week; social chatter elevated but not extreme"
 ```
 
+## Delivery — the daily report
+
+After every queued asset is scored and the phase is stamped, write one report
+to `reports/YYYY-MM-DD.md` (the session date, not the wall-clock date). Create
+the `reports/` folder if it does not exist. Overwrite an existing file for the
+same date; do not append a second run onto the first.
+
+Data for the report comes from what janus already stored — do not recompute or
+re-reason it:
+
+```bash
+janus score list --date YYYY-MM-DD    # direction, conviction, directive, plan, rationale
+janus cluster list                    # cluster_id -> cluster name
+janus trade list --open               # every open trade and its id
+janus trade show <TRADE_ID>           # units, summary, progress (unrealized P&L / R)
+```
+
+### File structure
+
+```markdown
+# Score report — YYYY-MM-DD
+
+Queue: N assets (F flagged, T open trades). Directives: X INITIATE, Y ADD, ...
+
+## Open trades
+
+<table 1>
+
+## Actions for today
+
+<table 2>
+
+## Other
+
+<table 3>
+
+## Data gaps
+
+- one bullet per declared gap, or "none"
+```
+
+An asset appears in **table 1** if it holds an open trade, and again in
+**table 2** if today's directive is actionable. That overlap is intended:
+table 1 is the state of the book, table 2 is the work list.
+
+### Table 1 — open trades
+
+Every open trade from `janus trade list --open`, including trades on assets
+that were not flagged today. Sort by absolute `unrealized_r`, descending.
+
+| Trade | Asset | Cluster | Side | Units | Avg entry | Stop | Open risk | Realized | Unrealized | R | Directive |
+
+- **Trade** — trade id, e.g. `#14`.
+- **Asset** — symbol, e.g. `BTC`.
+- **Cluster** — cluster name from `janus cluster list`; `—` if none.
+- **Side** — `trade.direction`: `long` or `short`.
+- **Units** — `summary.open_units`, plus closed count when any have exited,
+  e.g. `2` or `2 (+1 closed)`.
+- **Avg entry** — `summary.avg_entry`, at the asset's normal price precision.
+- **Stop** — the widest `stop` across open units; append ` (BE)` when that stop
+  is at or beyond `avg_entry`.
+- **Open risk** — `summary.open_risk`, whole dollars, e.g. `$400`.
+- **Realized** — `summary.realized_pnl`, whole dollars, signed, e.g. `+$620`;
+  `—` when no unit has closed.
+- **Unrealized** — `progress.unrealized_pnl`, whole dollars, signed. `—` when
+  `progress` is null.
+- **R** — `progress.unrealized_r` to 2 decimals with an `R` suffix, e.g.
+  `+1.85R`. `—` when null; suffix ` (stale)` when `janus trade show` returned a
+  coverage-stale warning.
+- **Directive** — today's `directive` for that asset, or `not scored` when the
+  asset was not in today's queue.
+
+Close the table with a totals line: open risk, realized, unrealized, and the
+book-weighted R.
+
+### Table 2 — actions for today
+
+Every scored asset whose `directive` is not `HOLD` and not `STAND_ASIDE` —
+`INITIATE`, `ADD`, `TRIM`, and `EXIT` alike, whether or not a trade is already
+open. Sort by directive in the order `EXIT`, `TRIM`, `ADD`, `INITIATE`; within a
+directive by `conviction` descending; ties broken by absolute `direction`
+descending.
+
+| Asset | Cluster | Directive | Position | Direction | Conviction | Action | Rationale |
+
+- **Asset**, **Cluster** — as in table 1.
+- **Directive** — verbatim: `INITIATE`, `ADD`, `TRIM`, `EXIT`.
+- **Position** — `position` as stored, e.g. `long:2`; `flat` for a new entry.
+- **Direction** — `direction` to 2 decimals, signed, e.g. `+0.84`.
+- **Conviction** — `conviction` to 2 decimals, e.g. `0.61`.
+- **Action** — the executable detail, from the stored `plan`:
+
+  | Directive | Action cell |
+  | --- | --- |
+  | `INITIATE` | `<side> · unit $<sizing_plan.suggested_notional> · risk $<sizing_plan.risk_dollars> · stop <sizing_plan.stop_price> (<stop_distance_pct>%) · tier <size_tier> · max <entry_plan.max_units>u` |
+  | `ADD` | same as INITIATE, prefixed `add unit N of <max_units>` |
+  | `TRIM` | `trim to <trim_plan.target_units>u, cut <trim_plan.which>` |
+  | `EXIT` | `exit all units` |
+
+  Append ` · stop: <stop_plan.action> <affected_units>` whenever a `stop_plan`
+  is present, plus ` → <new_stop>` when `new_stop` is set. If a directive that
+  should carry a plan has none (`size_tier: "blocked"`), put the blocking gate
+  here instead, e.g. `blocked: heat_gate`.
+
+- **Rationale** — the stored `rationale`, verbatim, one line.
+
+A `HOLD` on an open trade that still carries a `stop_plan` (trail, move to
+breakeven, tighten) belongs in this table too — the stop move is the action.
+Its Action cell is the `stop_plan` clause alone.
+
+### Table 3 — other
+
+Every remaining scored asset: no open trade, no action. In practice these are
+the `STAND_ASIDE` rows, plus any flagged asset the gates blocked. Sort by
+directive, then `conviction` descending, ties broken by absolute `direction`
+descending.
+
+| Asset | Cluster | Directive | Direction | Conviction | Why not | Rationale |
+
+- **Asset**, **Cluster**, **Direction**, **Conviction**, **Rationale** — as above.
+- **Directive** — verbatim, normally `STAND_ASIDE`.
+- **Why not** — the first failing gate from the stored `plan`
+  (`signal_gate`, `persistence_gate`, `trend_gate`, `binary_gate`, `heat_gate`,
+  `flipflop_gate`), e.g. `trend_gate: fail`. Use `plan.reason` when no gate
+  failed.
+
+### Rules
+
+- Report only, never a trade. The report is a record of what janus concluded;
+  the operator decides what to execute.
+- Never put a number in the report that did not come out of a janus envelope.
+  A missing value is `—`, not an estimate.
+- Omit a section header entirely if that table has no rows.
+
 ## What not to do
 
 - Do not supply a `sentiment` factor. Sentiment is derived from `crowding`.
@@ -267,3 +401,5 @@ janus score record UNI --date $TODAY \
 - Do not proceed to trade execution. The operator runs `janus trade open`.
 - Do not estimate or hallucinate numbers. Declare gaps.
 - Do not write a rationale longer than 3 sentences.
+- Do not skip the report, and do not write it before every queued asset is
+  scored.
