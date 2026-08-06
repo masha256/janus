@@ -270,6 +270,8 @@ Data for the report comes from what janus already stored — do not recompute or
 re-reason it:
 
 ```bash
+janus macro reads --date YYYY-MM-DD   # macro regime metric and summary
+janus cluster reads --date YYYY-MM-DD # per-cluster regime metric and summary
 janus score list --date YYYY-MM-DD    # direction, conviction, directive, plan, rationale
 janus cluster list                    # cluster_id -> cluster name
 janus trade list --open               # every open trade and its id
@@ -282,6 +284,12 @@ janus trade show <TRADE_ID>           # units, summary, progress (unrealized P&L
 # Score report — YYYY-MM-DD
 
 Queue: N assets (F flagged, T open trades). Directives: X INITIATE, Y ADD, ...
+
+## Regime
+
+**Macro: <regime>** — <macro summary>
+
+<cluster table>
 
 ## Open trades
 
@@ -303,6 +311,28 @@ Queue: N assets (F flagged, T open trades). Directives: X INITIATE, Y ADD, ...
 An asset appears in **table 1** if it holds an open trade, and again in
 **table 2** if today's directive is actionable. That overlap is intended:
 table 1 is the state of the book, table 2 is the work list.
+
+### Regime section
+
+The top-down read the session already recorded, reprinted so the report stands
+on its own. Do not re-reason it and do not adjust it — copy what
+`janus macro reads` and `janus cluster reads` return.
+
+- **Macro line** — the macro `metrics.regime` at one decimal, signed
+  (e.g. `+1.2`), followed by the recorded `summary` verbatim.
+- **Cluster table** — one row per cluster read, sorted by `regime` descending:
+
+  | Cluster | Regime | Δ vs macro | Summary |
+
+  - **Cluster** — `cluster_name`.
+  - **Regime** — `metrics.regime` at one decimal, signed.
+  - **Δ vs macro** — cluster regime minus macro regime, one decimal, signed,
+    e.g. `+0.4`; `0.0` when the cluster tracks macro.
+  - **Summary** — the recorded `summary` verbatim.
+
+If a phase is missing (no macro or no cluster reads for the date), say so in one
+line rather than inventing a number — but that should not happen, since the
+score phase requires both.
 
 ### Table 1 — open trades
 
@@ -391,7 +421,23 @@ descending.
   the operator decides what to execute.
 - Never put a number in the report that did not come out of a janus envelope.
   A missing value is `—`, not an estimate.
-- Omit a section header entirely if that table has no rows.
+- Omit a section header entirely if that table has no rows. The regime section
+  is never omitted.
+
+### Commit the report
+
+Once the file is written, commit and push it:
+
+```bash
+git add reports/YYYY-MM-DD.md
+git commit -m "report: YYYY-MM-DD"
+git push
+```
+
+Stage only the report file — never `git add -A`, and never commit anything else
+the run happened to touch. If the commit or push fails (nothing to commit, no
+remote, rejected push), report the git error and stop; the report file on disk
+is still the deliverable.
 
 ## What not to do
 
