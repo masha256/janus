@@ -15,7 +15,7 @@
 - Never edit `MIGRATIONS[0]`. An already-applied migration is frozen.
 - Errors thrown from domain and repo code are `JanusError` from `src/output.ts`, with codes `VALIDATION`, `NOT_FOUND`, `PHASE_ORDER`, `POSITION_CONFLICT`.
 - `trade-math.ts:51` states the rule this design obeys: *"Everything here is computed on read. Nothing is stored denormalized, so correcting a unit can never leave a stale total behind."* Do not add a stored `realized_pnl`.
-- Money and size comparisons in tests use a tolerance, not `assert.equal` on floats, except where the spec calls for exact summation.
+- Test fixtures are chosen so money and size arithmetic is exact in binary floating point (entry 100, notional 1000, halves of 500), so `assert.equal` is correct and intended for those. Use a tolerance only where a fixture genuinely cannot be exact — the `fraction: 1/3` case is the one place, and there the assertion is on the *sum* of the halves, which must be exact.
 - Commit after every task. Conventional-commit prefixes (`feat:`, `fix:`, `refactor:`, `test:`).
 
 ---
@@ -1055,9 +1055,10 @@ function contextFlat(): ScoreContext {
   return { ...ctx(0, null), open_trade: null };
 }
 
-// Starting points. Each test asserts the directive it expects, so if the
-// weights land somewhere else the failure names the problem — tune catalyst
-// and trend until the asserted directive comes out, then leave them alone.
+// Starting points for the factor inputs. Each test asserts the directive it
+// expects; if the weights land elsewhere, adjust these FIXTURE INPUTS until
+// the asserted directive comes out. Never weaken an assertion to match what
+// the code produced — the assertions encode the spec's precedence rules.
 const holdMetrics = m(0, 1, 0, 50, false, false);
 const exitMetrics = m(-2, -2, -2, 50, false, false);
 const initiateMetrics = m(2, 2, 1, 50, false, false);
