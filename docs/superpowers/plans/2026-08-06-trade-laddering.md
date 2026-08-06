@@ -58,28 +58,39 @@ test("migration 1 drops the dead ladder columns", () => {
   db.close();
 });
 
-test("migration 1 preserves existing trade rows", () => {
+test("migration 1 preserves the rows in an existing v1 database", () => {
   const db = openDb(":memory:");
+  // Stand up a genuine v1 database: the baseline schema and nothing after it.
+  // Do NOT just set user_version = 1 on an empty database — migrate would then
+  // skip the baseline and run the ALTERs against tables that do not exist.
+  db.exec(MIGRATIONS[0]!);
   db.exec("PRAGMA user_version = 1");
-  // Recreate just enough of v1 to hold a trade, then migrate.
-  migrate(db);
   db.exec(`
     INSERT INTO market VALUES (1,'BTC','perp','active',1,5,'2025-01-01','2026-07-31');
     INSERT INTO asset (id,market_id,symbol,class,active,added_at)
       VALUES (1,1,'BTC','crypto',1,'2026-07-31');
     INSERT INTO trade (id,asset_id,direction,status,opened_on,initial_price,initial_stop,initial_risk,created_at)
       VALUES (1,1,'long','open','2026-07-31',100,90,10,'2026-07-31T00:00:00Z');
-    INSERT INTO trade_unit (trade_id,seq,entry_on,entry_price,notional,risk,stop,status)
-      VALUES (1,1,'2026-07-31',100,1000,10,90,'open');
+    INSERT INTO trade_unit (trade_id,seq,entry_on,entry_price,notional,risk,stop,status,partial_exited)
+      VALUES (1,1,'2026-07-31',100,1000,10,90,'open',1);
   `);
-  assert.equal(migrate(db), 2, "re-running migrate must not advance past 2");
-  const row = db.prepare("SELECT notional, entry_price FROM trade_unit WHERE trade_id=1 AND seq=1")
-    .get() as { notional: number; entry_price: number };
-  assert.equal(row.notional, 1000);
+
+  assert.equal(migrate(db), 2, "a v1 database migrates to 2");
+
+  const row = db
+    .prepare("SELECT notional, entry_price, partial_exited FROM trade_unit WHERE trade_id=1 AND seq=1")
+    .get() as { notional: number; entry_price: number; partial_exited: number };
+  assert.equal(row.notional, 1000, "dropping columns must not disturb surviving values");
   assert.equal(row.entry_price, 100);
+  assert.equal(row.partial_exited, 1, "partial_exited survives the drop");
+
+  const trades = db.prepare("SELECT COUNT(*) AS n FROM trade").get() as { n: number };
+  assert.equal(trades.n, 1, "no rows lost");
   db.close();
 });
 ```
+
+`MIGRATIONS` is already exported from `src/db/migrate.ts` (line 3); add it to the import in the test file.
 
 - [ ] **Step 2: Run test to verify it fails**
 
