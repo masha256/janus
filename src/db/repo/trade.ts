@@ -150,6 +150,77 @@ export function exitUnits(
   }
 }
 
+/**
+ * Bank part of one unit. The closed slice becomes its own row rather than a
+ * stored P&L figure on the survivor, so every total in trade-math stays
+ * computed on read. Both rows keep the original entry price, which is what
+ * leaves avg_entry untouched across the split.
+ */
+export function partialExitUnit(
+  db: DatabaseSync,
+  tradeId: number,
+  seq: number,
+  price: number,
+  exitOn: string,
+  fraction: number,
+  funding?: number,
+): { closed_seq: number; closed_notional: number; remaining_notional: number } {
+  requireTrade(db, tradeId);
+  if (!(fraction > 0 && fraction < 1)) {
+    throw new JanusError(
+      "VALIDATION",
+      `fraction must be greater than 0 and less than 1, got ${fraction}`,
+    );
+  }
+  db.exec("BEGIN");
+  try {
+    const unit = db
+      .prepare("SELECT * FROM trade_unit WHERE trade_id = ? AND seq = ? AND status = 'open'")
+      .get(tradeId, seq) as
+        | { entry_on: string; entry_price: number; notional: number; risk: number; stop: number; tag: string | null }
+        | undefined;
+    if (unit === undefined) {
+      throw new JanusError("VALIDATION", `no open unit ${seq} on trade ${tradeId}`);
+    }
+
+    // Subtract rather than multiply twice, so the two halves sum to the original
+    // exactly instead of drifting by a float ulp.
+    const closedNotional = unit.notional * fraction;
+    const closedRisk = unit.risk * fraction;
+    const remainingNotional = unit.notional - closedNotional;
+    const remainingRisk = unit.risk - closedRisk;
+
+    const max = db
+      .prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM trade_unit WHERE trade_id = ?")
+      .get(tradeId) as { seq: number };
+    const closedSeq = max.seq + 1;
+
+    db.prepare(
+      `INSERT INTO trade_unit
+         (trade_id, seq, entry_on, entry_price, notional, risk, stop, status,
+          exit_on, exit_price, funding, tag, partial_exited)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'closed', ?, ?, ?, ?, 1)`,
+    ).run(
+      tradeId, closedSeq, unit.entry_on, unit.entry_price, closedNotional, closedRisk,
+      unit.stop, exitOn, price, funding ?? 0, unit.tag,
+    );
+
+    db.prepare(
+      "UPDATE trade_unit SET notional = ?, risk = ?, partial_exited = 1 WHERE trade_id = ? AND seq = ?",
+    ).run(remainingNotional, remainingRisk, tradeId, seq);
+
+    db.exec("COMMIT");
+    return {
+      closed_seq: closedSeq,
+      closed_notional: closedNotional,
+      remaining_notional: remainingNotional,
+    };
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
 export function getTrade(db: DatabaseSync, tradeId: number): unknown {
   const trade = requireTrade(db, tradeId);
   const units = unitsOf(db, tradeId);
