@@ -3,8 +3,9 @@ import { type Metrics, num, requireNum } from "./metrics.ts";
 import type { Read } from "./read.ts";
 import type { Directive, OpenPosition, PositionState, ScorePlan } from "./directive.ts";
 import type { CoverageValues } from "./coverage.ts";
-import { actionableNewSignal, heatGate, regimeTriggerState, runGates } from "./gates.ts";
+import { actionableNewSignal, decayGate, heatGate, regimeTriggerState, runGates } from "./gates.ts";
 import { sizeFromRiskAndStop, stopDistancePct, stopFromAtr } from "./sizing.ts";
+import { deriveLadderPlan, type LadderPlan } from "./ladder.ts";
 
 const clamp = (x: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, x));
 const boolParam = (params: Record<string, number>, key: string): boolean =>
@@ -335,6 +336,23 @@ function derivePlan(
     },
   );
 
+  // The stop ladder, for an asset we actually hold. It owns stop management;
+  // the directive branches below own the exit decision.
+  const openTrade = context.open_trade ?? null;
+  const ladder: LadderPlan | null = openTrade === null ? null : deriveLadderPlan({
+    direction: openTrade.direction,
+    units: openTrade.units,
+    entryPrice: openTrade.entry_price,
+    initialRisk: openTrade.initial_risk,
+    coverage: context.asset.coverage,
+    openedOn: openTrade.opened_on,
+    today: context.session_date,
+    addWindowOpen: openTrade.units.some((u) => u.partial_exited === 1),
+    lateTrend: trend === "late_trend",
+    decaySignal: decayGate(conviction, position.side, context.recent_scores ?? [], params),
+    params,
+  });
+
   const blocked = signal === "fail" || persistence === "fail" || trend === "fail" || binary === "blocked" || initialHeat === "blocked" || flipflop === "blocked";
   const starter = !blocked && trend === "starter";
   const sizeTier: ScorePlan["size_tier"] = blocked ? "blocked" : starter ? "starter" : "full";
@@ -564,7 +582,39 @@ function derivePlan(
     }
   }
 
-  return { plan, sizingPlan };
+  return { plan: applyLadder(plan, ladder), sizingPlan };
+}
+
+/**
+ * Overlay the stop ladder on a directive plan. The directive owns whether we
+ * are getting out; the ladder owns how the stop is managed while we are in.
+ * The two exceptions are time_stop and decay_exit, which are unconditional
+ * risk rules — they escalate rather than sit quietly under a HOLD.
+ */
+function applyLadder(plan: ScorePlan, ladder: LadderPlan | null): ScorePlan {
+  if (ladder === null) return plan;
+  if (plan.directive === "EXIT" || plan.directive === "STAND_ASIDE") return plan;
+
+  const next: ScorePlan = {
+    ...plan,
+    stop_plan: {
+      action: ladder.action,
+      affected_units: ladder.affected_units,
+      rationale: ladder.rationale,
+      event: ladder.event,
+      ...(ladder.new_stop === undefined ? {} : { new_stop: ladder.new_stop }),
+      ...(ladder.trim_fraction === undefined ? {} : { trim_fraction: ladder.trim_fraction }),
+    },
+  };
+
+  if (ladder.event === "time_stop" || ladder.event === "decay_exit") {
+    return {
+      ...next,
+      directive: "EXIT",
+      reason: `${next.reason} (ladder: ${ladder.rationale})`,
+    };
+  }
+  return next;
 }
 
 function buildProposedHeat(
