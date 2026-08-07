@@ -11,7 +11,7 @@ import { getScore } from "../db/repo/score.js";
 import { getGlobalParams, getClusterParams } from "../db/repo/cluster.js";
 import { resolveParams } from "../domain/params.js";
 import { sizeFromRiskAndStop, stopDistancePct, stopFromAtr } from "../domain/sizing.js";
-import { isStopWidening } from "../domain/ladder.js";
+import { isStopWidening, proposeTrailingStop } from "../domain/ladder.js";
 const VERBS = "open, add-unit, set-stop, exit, list, show";
 // Risk may legitimately be 0 once a stop has been moved past entry (free carry).
 const RISK_MAX = Number.MAX_SAFE_INTEGER;
@@ -294,13 +294,18 @@ function resolveAutoStop(db, tradeId, seq) {
     if (coverage === undefined || coverage.mark_price === null || coverage.atr14 === null) {
         throw new JanusError("VALIDATION", "no coverage available to trail stop");
     }
-    const params = resolveParams(
-    // cluster resolution skipped for brevity; asset cluster looked up below
-    {}, getGlobalParams(db));
-    const mark = coverage.mark_price;
-    const atr = coverage.atr14;
-    const multiple = params["trailing_atr_multiple"] ?? 2;
-    return trade.trade.direction === "long" ? mark - multiple * atr : mark + multiple * atr;
+    const asset = requireAssetBySymbol(db, trade.trade.symbol);
+    const params = resolveParams(getClusterParams(db, asset.cluster_id), getGlobalParams(db));
+    const direction = trade.trade.direction;
+    const affected = trade.units.filter((u) => u.status === "open" && (seq === undefined || u.seq === seq));
+    if (affected.length === 0) {
+        throw new JanusError("VALIDATION", `no open unit to trail on trade ${tradeId}`);
+    }
+    // One stop lands on every affected unit, so ratchet against the tightest of
+    // them. Without this the raw ATR trail moves backwards on a pullback and the
+    // widening guard below rejects the very stop this function just proposed.
+    const floor = affected.reduce((a, u) => (direction === "long" ? Math.max(a, u.stop) : Math.min(a, u.stop)), direction === "long" ? -Infinity : Infinity);
+    return proposeTrailingStop(direction, coverage.mark_price, coverage.atr14, floor, params["trailing_atr_multiple"] ?? 2);
 }
 function show(raw, date) {
     return withDb((db) => {

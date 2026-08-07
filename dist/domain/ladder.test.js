@@ -138,7 +138,8 @@ test("unrealized R uses each unit's own cost basis, not the trade's entry", () =
 });
 test("the runner rung never proposes a stop wider than the current one", () => {
     // Pullback: stop already trailed to 120, mark back down to 122 with ATR 8.
-    // Raw trail is 122 - 2*8 = 106, which would add 14 points of risk per unit.
+    // Raw trail is 122 - 2*8 = 106, which would add 14 points of risk per unit,
+    // so the rung advises nothing rather than proposing a move.
     const plan = deriveLadderPlan({
         ...baseInputs,
         units: [runnerUnit({ stop: 120 })],
@@ -146,8 +147,8 @@ test("the runner rung never proposes a stop wider than the current one", () => {
         addWindowOpen: true,
     });
     assert.equal(plan.event, "runner");
-    assert.equal(plan.new_stop, 120);
-    assert.equal(isStopWidening("long", 120, plan.new_stop), false);
+    assert.equal(plan.action, "hold");
+    assert.equal(plan.new_stop, undefined);
 });
 test("isStopWidening guards long and short stops", () => {
     assert.equal(isStopWidening("long", 90, 85), true);
@@ -160,4 +161,61 @@ test("proposeTrailingStop never widens", () => {
     assert.equal(proposeTrailingStop("long", 120, 5, 108, 2), 110);
     assert.equal(proposeTrailingStop("short", 80, 5, 90, 2), 90);
     assert.equal(proposeTrailingStop("short", 80, 5, 92, 2), 90);
+});
+test("the runner rung holds rather than over-tightening a looser unit", () => {
+    // An older unit trailed to 118 and a fresh add still at 90. The raw trail is
+    // 122 - 2*8 = 106, which would widen the 118 unit — so nothing moves. The old
+    // behaviour clamped to 118 and yanked the 90 unit up 28 points.
+    const plan = deriveLadderPlan({
+        ...baseInputs,
+        units: [runnerUnit({ seq: 1, stop: 118 }), runnerUnit({ seq: 2, stop: 90 })],
+        coverage: coverage(122, 8),
+        addWindowOpen: true,
+    });
+    assert.equal(plan.action, "hold");
+    assert.equal(plan.new_stop, undefined, "no unit is asked to move");
+});
+test("the runner rung trails every unit when the trail tightens all of them", () => {
+    const plan = deriveLadderPlan({
+        ...baseInputs,
+        units: [runnerUnit({ seq: 1, stop: 100 }), runnerUnit({ seq: 2, stop: 100 })],
+        coverage: coverage(130, 5),
+        addWindowOpen: true,
+    });
+    assert.equal(plan.action, "trail");
+    assert.equal(plan.affected_units, "all");
+    assert.equal(plan.new_stop, 120); // 130 - 2*5, above both current stops
+});
+test("the runner rung never proposes a stop above the mark", () => {
+    // Degenerate: a unit already stopped at 130 with price back at 122.
+    const plan = deriveLadderPlan({
+        ...baseInputs,
+        units: [runnerUnit({ stop: 130 })],
+        coverage: coverage(122, 8),
+        addWindowOpen: true,
+    });
+    assert.equal(plan.action, "hold");
+    assert.equal(plan.new_stop, undefined);
+});
+test("the runner rung ratchets correctly for shorts", () => {
+    const short = { ...baseInputs, direction: "short" };
+    // Pullback against a short: raw trail 78 + 2*4 = 86 would widen the 80 stop.
+    const held = deriveLadderPlan({
+        ...short,
+        units: [runnerUnit({ seq: 1, stop: 80 }), runnerUnit({ seq: 2, stop: 82 })],
+        coverage: coverage(78, 4),
+        addWindowOpen: true,
+    });
+    assert.equal(held.action, "hold");
+    assert.equal(held.new_stop, undefined);
+    // Price falls further: raw trail 70 + 2*4 = 78 tightens both stops.
+    const trailed = deriveLadderPlan({
+        ...short,
+        units: [runnerUnit({ seq: 1, stop: 80 }), runnerUnit({ seq: 2, stop: 82 })],
+        coverage: coverage(70, 4),
+        addWindowOpen: true,
+    });
+    assert.equal(trailed.action, "trail");
+    assert.equal(trailed.new_stop, 78);
+    assert.equal(isStopWidening("short", 80, trailed.new_stop), false);
 });

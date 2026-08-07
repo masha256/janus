@@ -102,11 +102,24 @@ export function deriveLadderPlan(inputs) {
         }
     }
     // Runner / late-trend trailing stop.
+    //
+    // An ATR trail depends only on mark and ATR, never on where a unit was
+    // entered, so one price is the correct trail for every open unit at once.
+    // The only question is whether it would widen the tightest of them: if so we
+    // advise nothing, because clamping to that tightest stop instead would drag
+    // every looser unit up with it and strangle a runner the ladder is trying to
+    // let breathe.
     if (addWindowOpen && atr !== null && mark !== null) {
-        // The proposal covers every open unit, so it must not widen the tightest of
-        // them: floor at the best current stop, never below breakeven.
-        const floor = openUnits.reduce((a, u) => (direction === "long" ? Math.max(a, u.stop) : Math.min(a, u.stop)), entryPrice);
-        const newStop = proposeTrailingStop(direction, mark, atr, floor, trailingMultiple);
+        const newStop = proposeTrailingStop(direction, mark, atr, entryPrice, trailingMultiple);
+        const tightest = openUnits.reduce((a, u) => (direction === "long" ? Math.max(a, u.stop) : Math.min(a, u.stop)), direction === "long" ? -Infinity : Infinity);
+        if (isStopWidening(direction, tightest, newStop)) {
+            return {
+                event: "runner",
+                action: "hold",
+                affected_units: "all",
+                rationale: "trailing stop would widen the tightest unit; hold",
+            };
+        }
         return {
             event: lateTrend ? "tighten" : "runner",
             action: lateTrend ? "tighten" : "trail",
