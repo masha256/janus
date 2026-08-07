@@ -596,6 +596,12 @@ function derivePlan(
 function applyLadder(plan: ScorePlan, ladder: LadderPlan | null): ScorePlan {
   if (ladder === null) return plan;
   if (plan.directive === "EXIT" || plan.directive === "STAND_ASIDE") return plan;
+  // An ADD on the entry rung is the one place the ladder must yield. The entry
+  // rung says "hold, full 1R at risk", which is both a loosened risk rule at
+  // the moment exposure doubles and false once the second unit is on (2R at
+  // risk). Keep ADD's own "lock the earlier unit" stop instead. Deliberate, not
+  // an oversight — do not fold this back into the general replacement below.
+  if (plan.directive === "ADD" && ladder.event === "entry") return plan;
 
   const next: ScorePlan = {
     ...plan,

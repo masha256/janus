@@ -140,6 +140,35 @@ test("pre-breakeven decay exits full position", () => {
   assert.equal(plan.action, "decay_exit");
 });
 
+test("unrealized R uses each unit's own cost basis, not the trade's entry", () => {
+  // unit 1: size 10 from 100, unit 2: size 10 from 120, mark 130, initialRisk 100.
+  // True PnL = 10*(130-100) + 10*(130-120) = 400, so 4.00R — not 20*(130-100)/100 = 6.00R.
+  const plan = deriveLadderPlan({
+    ...baseInputs,
+    units: [
+      unit({ seq: 1, entry_price: 100, notional: 1000, stop: 100 }),
+      unit({ seq: 2, entry_price: 120, notional: 1200, stop: 120 }),
+    ],
+    coverage: coverage(130, 5),
+  });
+  assert.equal(plan.event, "partial");
+  assert.match(plan.rationale, /unrealized R 4\.00 /);
+});
+
+test("the runner rung never proposes a stop wider than the current one", () => {
+  // Pullback: stop already trailed to 120, mark back down to 122 with ATR 8.
+  // Raw trail is 122 - 2*8 = 106, which would add 14 points of risk per unit.
+  const plan = deriveLadderPlan({
+    ...baseInputs,
+    units: [runnerUnit({ stop: 120 })],
+    coverage: coverage(122, 8),
+    addWindowOpen: true,
+  });
+  assert.equal(plan.event, "runner");
+  assert.equal(plan.new_stop, 120);
+  assert.equal(isStopWidening("long", 120, plan.new_stop!), false);
+});
+
 test("isStopWidening guards long and short stops", () => {
   assert.equal(isStopWidening("long", 90, 85), true);
   assert.equal(isStopWidening("long", 90, 95), false);
