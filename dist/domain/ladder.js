@@ -10,12 +10,13 @@ export function deriveLadderPlan(inputs) {
     const timeStopDays = params["max_time_stop_days"] ?? 42;
     const openUnits = units.filter((u) => u.status === "open");
     const closedUnits = units.filter((u) => u.status === "closed");
-    // Unrealized R across the whole trade, if we have a mark price.
+    // Unrealized R across the whole trade, if we have a mark price. Each unit is
+    // marked against its own cost basis — a later add bought higher has not made
+    // the delta from the trade's first entry price.
     const unrealizedR = (() => {
         if (mark === null || initialRisk === 0)
             return null;
-        const size = openUnits.reduce((a, u) => a + u.notional / u.entry_price, 0);
-        const pnl = size * (mark - entryPrice) * sign;
+        const pnl = openUnits.reduce((a, u) => a + (u.notional / u.entry_price) * (mark - u.entry_price) * sign, 0);
         return pnl / Math.abs(initialRisk);
     })();
     // Time stop: position open too long without reaching target.
@@ -102,8 +103,10 @@ export function deriveLadderPlan(inputs) {
     }
     // Runner / late-trend trailing stop.
     if (addWindowOpen && atr !== null && mark !== null) {
-        const rawStop = mark - trailingMultiple * atr * sign;
-        const newStop = direction === "long" ? Math.max(rawStop, entryPrice) : Math.min(rawStop, entryPrice);
+        // The proposal covers every open unit, so it must not widen the tightest of
+        // them: floor at the best current stop, never below breakeven.
+        const floor = openUnits.reduce((a, u) => (direction === "long" ? Math.max(a, u.stop) : Math.min(a, u.stop)), entryPrice);
+        const newStop = proposeTrailingStop(direction, mark, atr, floor, trailingMultiple);
         return {
             event: lateTrend ? "tighten" : "runner",
             action: lateTrend ? "tighten" : "trail",

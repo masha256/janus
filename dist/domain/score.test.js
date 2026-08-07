@@ -451,6 +451,19 @@ test("an escalated EXIT drops the ADD's sizing_plan and entry_plan", () => {
     assert.equal(plan.sizing_plan, undefined, "an exit-everything plan must not size a new add");
     assert.equal(plan.entry_plan, undefined);
 });
+test("an ADD keeps its lock-the-earlier-unit stop rule on the ladder's entry rung", () => {
+    // One open unit, stop 90 still below entry 100, mark 105 = +0.5R: the ladder
+    // lands on `entry` ("hold, full 1R at risk"), which would contradict adding.
+    const c = {
+        ...contextWithOpenTrade({ mark: 105, atr14: 5, stop: 90 }),
+        recent_scores: [strongPrior],
+    };
+    const { plan } = deriveScore(initiateMetrics, c, PARAMS);
+    assert.equal(plan.directive, "ADD");
+    assert.equal(plan.stop_plan?.action, "move_to_breakeven");
+    assert.equal(plan.stop_plan?.affected_units, "oldest");
+    assert.equal(plan.stop_plan?.event, undefined, "the entry rung must not overwrite an ADD's stop rule");
+});
 test("an escalated EXIT drops the TRIM's trim_plan", () => {
     const twoUnits = (recent) => ({
         ...contextWithOpenTrade({ mark: 130, atr14: 5, stop: 100, partialExited: true }),

@@ -138,7 +138,9 @@ export function partialExitUnit(db, tradeId, seq, price, exitOn, fraction, fundi
  * The open trade for an asset with every unit, for the stop ladder. The
  * trade-level counterpart to positionOf, which reports only side and count.
  * Closed units come along: the ladder reads prior exits to decide which rung
- * it is on.
+ * it is on. Same zero-open-units collapse as positionOf and openPositions: an
+ * open trade whose units have all closed is not a live position, and feeding it
+ * to the ladder lets a time stop escalate to "exit" on an asset we are flat in.
  */
 export function openTradeForAsset(db, assetId) {
     const row = db
@@ -147,9 +149,12 @@ export function openTradeForAsset(db, assetId) {
         .get(assetId);
     if (row === undefined)
         return null;
+    const units = unitsOf(db, row.id);
+    if (!units.some((u) => u.status === "open"))
+        return null;
     return {
         direction: row.direction,
-        units: unitsOf(db, row.id),
+        units,
         entry_price: row.initial_price,
         initial_risk: row.initial_risk,
         opened_on: row.opened_on,

@@ -207,6 +207,17 @@ test("openTradeForAsset includes closed units, so the ladder can see prior exits
     assert.equal(state.units.find((u) => u.seq === 1)?.partial_exited, 1);
     db.close();
 });
+test("openTradeForAsset reports flat when every unit has closed", () => {
+    // Same guard positionOf and openPositions carry: an open trade row with zero
+    // open units must not feed the ladder, or it can escalate to EXIT on an asset
+    // the operator is flat in.
+    const db = fresh();
+    const assetId = requireAssetBySymbol(db, "BTC").id;
+    const id = openTrade(db, { ...input, asset_id: assetId }, NOW);
+    db.prepare("UPDATE trade_unit SET status = 'closed' WHERE trade_id = ?").run(id);
+    assert.equal(openTradeForAsset(db, assetId), null);
+    db.close();
+});
 test("openTradeForAsset returns null once the trade closes", () => {
     const db = fresh();
     const assetId = requireAssetBySymbol(db, "BTC").id;
