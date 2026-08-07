@@ -57,6 +57,8 @@ export type ScoreContext = {
   /** Sum of heat across all open positions in the book. */
   current_heat?: number;
   previous_score?: ScoreResult | null;
+  /** The open trade for this asset, if any, for the stop ladder. */
+  open_trade?: import("../db/repo/trade.ts").OpenTradeState | null;
 };
 
 export type ScoreResult = {

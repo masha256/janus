@@ -13,7 +13,7 @@ import { resolveParams } from "../domain/params.ts";
 import { deriveScore, type ScoreResult } from "../domain/score.ts";
 import { formatPosition, planResults } from "../domain/directive.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
-import { bookHeat } from "../db/repo/trade.ts";
+import { bookHeat, openTradeForAsset } from "../db/repo/trade.ts";
 import { pairs, readText, required, unknownVerb } from "./args.ts";
 import { collect, type Emit, handler, withDb } from "./command.ts";
 import { JanusError } from "../output.ts";
@@ -129,6 +129,7 @@ function record(symbol: string | undefined, opts: RecordOpts): Promise<unknown> 
       account_capital: params["account_capital"] ?? 0,
       current_heat: bookHeat(db),
       previous_score: previous,
+      open_trade: openTradeForAsset(db, asset.id),
     };
 
     const { direction, conviction, directive, plan, results } = deriveScore(factors, context, params);

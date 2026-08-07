@@ -25,6 +25,14 @@ export type UnitInput = {
   tag?: string | null;
 };
 
+export type OpenTradeState = {
+  direction: "long" | "short";
+  units: UnitRow[];
+  entry_price: number;
+  initial_risk: number;
+  opened_on: string;
+};
+
 type TradeRecord = {
   id: number;
   asset_id: number;
@@ -219,6 +227,31 @@ export function partialExitUnit(
     db.exec("ROLLBACK");
     throw e;
   }
+}
+
+/**
+ * The open trade for an asset with every unit, for the stop ladder. The
+ * trade-level counterpart to positionOf, which reports only side and count.
+ * Closed units come along: the ladder reads prior exits to decide which rung
+ * it is on.
+ */
+export function openTradeForAsset(db: DatabaseSync, assetId: number): OpenTradeState | null {
+  const row = db
+    .prepare(
+      `SELECT id, direction, initial_price, initial_risk, opened_on
+       FROM trade WHERE asset_id = ? AND status = 'open'`,
+    )
+    .get(assetId) as
+      | { id: number; direction: "long" | "short"; initial_price: number; initial_risk: number; opened_on: string }
+      | undefined;
+  if (row === undefined) return null;
+  return {
+    direction: row.direction,
+    units: unitsOf(db, row.id),
+    entry_price: row.initial_price,
+    initial_risk: row.initial_risk,
+    opened_on: row.opened_on,
+  };
 }
 
 export function getTrade(db: DatabaseSync, tradeId: number): unknown {

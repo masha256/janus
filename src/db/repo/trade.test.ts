@@ -4,7 +4,7 @@ import { openDb } from "../connect.ts";
 import { migrate } from "../migrate.ts";
 import { upsertMarkets } from "./market.ts";
 import { addAsset, requireAssetBySymbol } from "./asset.ts";
-import { openTrade, addUnit, setStop, exitUnits, getTrade, listTrades, partialExitUnit } from "./trade.ts";
+import { openTrade, addUnit, setStop, exitUnits, getTrade, listTrades, partialExitUnit, openTradeForAsset } from "./trade.ts";
 import { positionOf } from "./score.ts";
 
 const NOW = "2026-07-31T12:00:00Z";
@@ -208,6 +208,48 @@ test("partialExitUnit rejects fractions outside (0,1) and unknown units", () => 
     assert.throws(() => partialExitUnit(db, id, 1, 120, DATE, f), /fraction/i, `fraction ${f}`);
   }
   assert.throws(() => partialExitUnit(db, id, 99, 120, DATE, 0.5), /no open unit/i);
+  db.close();
+});
+
+test("openTradeForAsset returns null when flat", () => {
+  const db = fresh();
+  assert.equal(openTradeForAsset(db, requireAssetBySymbol(db, "BTC").id), null);
+  db.close();
+});
+
+test("openTradeForAsset returns the trade with its units", () => {
+  const db = fresh();
+  const assetId = requireAssetBySymbol(db, "BTC").id;
+  const id = openTrade(db, { ...input, asset_id: assetId }, NOW);
+  addUnit(db, id, { entry_on: DATE, price: 110, stop: 100, risk: 100, notional: 1100 });
+
+  const state = openTradeForAsset(db, assetId)!;
+  assert.equal(state.direction, "long");
+  assert.equal(state.entry_price, 100, "entry_price is the trade's initial_price");
+  assert.equal(state.initial_risk, 100);
+  assert.equal(state.opened_on, DATE);
+  assert.equal(state.units.length, 2);
+  db.close();
+});
+
+test("openTradeForAsset includes closed units, so the ladder can see prior exits", () => {
+  const db = fresh();
+  const assetId = requireAssetBySymbol(db, "BTC").id;
+  const id = openTrade(db, { ...input, asset_id: assetId }, NOW);
+  partialExitUnit(db, id, 1, 120, DATE, 0.5);
+  const state = openTradeForAsset(db, assetId)!;
+  assert.equal(state.units.length, 2);
+  assert.equal(state.units.filter((u) => u.status === "closed").length, 1);
+  assert.equal(state.units.find((u) => u.seq === 1)?.partial_exited, 1);
+  db.close();
+});
+
+test("openTradeForAsset returns null once the trade closes", () => {
+  const db = fresh();
+  const assetId = requireAssetBySymbol(db, "BTC").id;
+  const id = openTrade(db, { ...input, asset_id: assetId }, NOW);
+  exitUnits(db, id, 120, DATE);
+  assert.equal(openTradeForAsset(db, assetId), null);
   db.close();
 });
 
