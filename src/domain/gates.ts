@@ -70,6 +70,32 @@ export function persistenceGate(
   return count >= required ? "pass" : "fail";
 }
 
+/**
+ * Signal decay: conviction has sat below the floor for N consecutive run-days
+ * on the side we are actually holding. One bad print is noise, which is why
+ * this needs persistence — the ladder turns a true reading into a full exit.
+ *
+ * A direction flip is not decay. The EXIT directive branch already owns that.
+ */
+export function decayGate(
+  conviction: number,
+  side: "long" | "short" | null,
+  recentScores: ScoreResult[],
+  params: Record<string, number>,
+): boolean {
+  const floor = params["decay_conviction_floor"] ?? 4;
+  const required = Math.max(1, Math.round(params["decay_persist_days"] ?? 2));
+  if (conviction >= floor) return false;
+  let count = 1; // today is the first decay day
+  for (const s of recentScores) {
+    const sameSide = side !== null &&
+      ((side === "long" && s.direction > 0) || (side === "short" && s.direction < 0));
+    if (sameSide && s.conviction < floor) count++;
+    else break;
+  }
+  return count >= required;
+}
+
 export function trendGate(
   side: "long" | "short" | null,
   coverage: CoverageValues | null,
