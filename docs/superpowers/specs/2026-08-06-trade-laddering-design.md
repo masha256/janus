@@ -113,7 +113,7 @@ stop_plan?: {
 };
 ```
 
-Both round-trip through `planToResults` / `scorePlanFromResults` as `stop_event` and
+Both round-trip through `planResults` / `scorePlanFromResults` as `stop_event` and
 `stop_trim_fraction`, following the existing key naming in `directive.ts:138-143`.
 
 ## Partial exits
@@ -211,7 +211,7 @@ Both would silently corrupt ladder output, so they are in scope.
 
 ### `stop_new_stop` is written but never read back
 
-`planToResults` persists it (`directive.ts:142`) and `scorePlanFromResults` restores it
+`planResults` persists it (`directive.ts:142`) and `scorePlanFromResults` restores it
 (`directive.ts:190`). But `repo/score.ts:242-249` is a **near-duplicate reader that omits
 `new_stop`**. `new_stop` is the ladder's primary output — every trailing stop it computes
 would vanish on reload.

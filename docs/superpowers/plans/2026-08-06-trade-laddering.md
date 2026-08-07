@@ -630,7 +630,7 @@ git commit -m "feat: add decayGate, a persistence-confirmed conviction collapse"
 
 **Context:** Two pre-existing bugs that only become visible once the ladder starts producing values, so they are fixed before it is wired up.
 
-1. `planToResults` writes `stop_new_stop` (`directive.ts:142`) and `scorePlanFromResults` restores it (`directive.ts:190`) — but `repo/score.ts:242-249` is a **near-duplicate reader that silently omits `new_stop`**. `new_stop` is the ladder's primary output; every trailing stop would vanish on reload.
+1. `planResults` writes `stop_new_stop` (`directive.ts:142`) and `scorePlanFromResults` restores it (`directive.ts:190`) — but `repo/score.ts:242-249` is a **near-duplicate reader that silently omits `new_stop`**. `new_stop` is the ladder's primary output; every trailing stop would vanish on reload.
 2. `cli/score.ts:105` fetches recent scores with `LIMIT = signal_persist_days` (default 2). If `decay_persist_days` is larger, `decayGate` cannot see enough history and can never fire.
 
 - [ ] **Step 1: Write the failing test**
@@ -661,7 +661,7 @@ test("stop_plan.new_stop survives a record/read round-trip", () => {
   recordScore(db, DATE, assetId, {
     direction: 1, conviction: 7, directive: "HOLD",
     queue_reason: "position", position_state: "long",
-    rationale: "trailing", metrics: {}, results: planToResults(plan),
+    rationale: "trailing", metrics: {}, results: planResults(plan),
   }, NOW);
 
   const back = getScore(db, DATE, assetId);
@@ -669,7 +669,7 @@ test("stop_plan.new_stop survives a record/read round-trip", () => {
 });
 ```
 
-Import `planToResults` from `../../domain/directive.ts`. Match the exact `ScoreRow` shape the file's other `recordScore` calls use.
+Import `planResults` from `../../domain/directive.ts`. Match the exact `ScoreRow` shape the file's other `recordScore` calls use.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -730,7 +730,7 @@ git commit -m "fix: stop dropping new_stop on read and deepen the score window"
 - Consumes: `LadderEvent` from `src/domain/ladder.ts:4`.
 - Produces: `stop_plan.event?: LadderEvent` and `stop_plan.trim_fraction?: number`, persisted as `stop_event` and `stop_trim_fraction`.
 
-**Context:** The operator needs to know which rung fired and what fraction to hand to `trade exit --fraction`. Follow the existing key-naming convention in `planToResults`.
+**Context:** The operator needs to know which rung fired and what fraction to hand to `trade exit --fraction`. Follow the existing key-naming convention in `planResults`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -749,7 +749,7 @@ test("stop_plan event and trim_fraction round-trip through results", () => {
       rationale: "unrealized R 1.62 reached +1.5R; bank partial and open add window",
     },
   };
-  const results = planToResults(plan);
+  const results = planResults(plan);
   assert.equal(results["stop_event"], "partial");
   assert.equal(results["stop_trim_fraction"], 0.5);
 
@@ -766,7 +766,7 @@ test("a stop_plan without event or trim_fraction omits both keys", () => {
     heat_gate: "pass" as const, flipflop_gate: "n/a" as const,
     stop_plan: { action: "hold" as const, affected_units: "all" as const, rationale: "no change" },
   };
-  const results = planToResults(plan);
+  const results = planResults(plan);
   assert.equal(results["stop_event"], undefined);
   assert.equal(results["stop_trim_fraction"], undefined);
   assert.equal(scorePlanFromResults(results)?.stop_plan?.trim_fraction, undefined);
