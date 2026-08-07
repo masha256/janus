@@ -20,17 +20,12 @@ a non-zero status so the cron job surfaces the failure.
 
 ## Pre-flight
 
-1. Ensure the session exists for the target date (today, anchored to the prior
-   4 PM ET close):
-   ```bash
-   janus session open --date YYYY-MM-DD
-   ```
-2. Verify the prior phases are stamped. The screen phase requires `coverage` to
+1. Verify the prior phases are stamped. The screen phase requires `coverage` to
    be complete:
    ```bash
    janus session status --date YYYY-MM-DD
    ```
-3. List the assets that have coverage today. These are the only assets you
+2. List the assets that have coverage today. These are the only assets you
    screen:
    ```bash
    janus coverage list --date YYYY-MM-DD

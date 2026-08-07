@@ -30,15 +30,11 @@ that 4 PM anchor.
 
 ## Pre-flight
 
-1. Open today's session if it does not exist:
-   ```bash
-   janus session open --date YYYY-MM-DD
-   ```
-2. List clusters from the janus roster so you know how many cluster reads are
-   required:
-   ```bash
-   janus cluster list
-   ```
+List clusters from the janus roster so you know how many cluster reads are
+required:
+```bash
+janus cluster list
+```
 
 ## Phase 1 — Macro read
 
@@ -170,7 +166,6 @@ cluster before moving to the next pipeline phase.
 # Anchor date: 2026-08-04
 TODAY=2026-08-04
 
-janus session open --date $TODAY
 janus macro record --date $TODAY \
   --summary "Fed on hold, curve flattening on growth fear, credit +12bp off lows, VIX term inverted" \
   --metric regime=-0.5
