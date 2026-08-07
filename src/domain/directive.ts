@@ -1,3 +1,5 @@
+import type { LadderEvent } from "./ladder.ts";
+
 /** `NONE` is the default: a score that has not concluded what to do about the position. */
 export type Directive =
   | "NONE"
@@ -64,6 +66,10 @@ export type ScorePlan = {
     affected_units: "all" | "oldest" | "newest" | "partial_target" | string;
     /** Optional computed stop price, e.g. from ATR trailing. */
     new_stop?: number;
+    /** Which ladder rung produced this, when the stop ladder was the source. */
+    event?: LadderEvent;
+    /** Fraction of the affected unit to bank, for the partial rung. */
+    trim_fraction?: number;
     rationale: string;
   };
 
@@ -140,6 +146,10 @@ export function planResults(plan: ScorePlan): Record<string, number | string> {
     r["stop_affected_units"] = plan.stop_plan.affected_units;
     r["stop_rationale"] = plan.stop_plan.rationale;
     if (plan.stop_plan.new_stop !== undefined) r["stop_new_stop"] = plan.stop_plan.new_stop;
+    if (plan.stop_plan.event !== undefined) r["stop_event"] = plan.stop_plan.event;
+    if (plan.stop_plan.trim_fraction !== undefined) {
+      r["stop_trim_fraction"] = plan.stop_plan.trim_fraction;
+    }
   }
   if (plan.sizing_plan) {
     r["sizing_suggested_notional"] = plan.sizing_plan.suggested_notional;
@@ -188,6 +198,10 @@ export function scorePlanFromResults(results: Record<string, unknown>): ScorePla
       affected_units: String(results["stop_affected_units"] ?? "all") as NonNullable<ScorePlan["stop_plan"]>["affected_units"],
       rationale: String(results["stop_rationale"] ?? ""),
       new_stop: results["stop_new_stop"] === undefined ? undefined : Number(results["stop_new_stop"]),
+      event: results["stop_event"] as LadderEvent | undefined,
+      trim_fraction: results["stop_trim_fraction"] === undefined
+        ? undefined
+        : Number(results["stop_trim_fraction"]),
     };
   }
   const trimTarget = results["trim_target_units"] as number | undefined;
