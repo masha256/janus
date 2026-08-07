@@ -229,6 +229,39 @@ test("trade with no verb names the verbs instead of quoting undefined", async ()
         await assert.rejects(() => handle(undefined, []), (e) => e.code === "VALIDATION" && e.message === "trade requires a verb; try: open, add-unit, set-stop, exit, list, show");
     });
 });
+test("exit --fraction requires --unit", async () => {
+    await withHarness(async () => {
+        await handle("open", OPEN_ARGS);
+        await assert.rejects(() => handle("exit", ["1", "--price", "120", "--fraction", "0.5"]), (e) => e.code === "VALIDATION" && /--fraction requires --unit/.test(e.message));
+    });
+});
+test("exit --fraction 1 points at plain exit", async () => {
+    await withHarness(async () => {
+        await handle("open", OPEN_ARGS);
+        await assert.rejects(() => handle("exit", ["1", "--unit", "1", "--price", "120", "--fraction", "1"]), (e) => e.code === "VALIDATION" && /without --fraction/.test(e.message));
+    });
+});
+test("exit --fraction 0 is rejected", async () => {
+    await withHarness(async () => {
+        await handle("open", OPEN_ARGS);
+        await assert.rejects(() => handle("exit", ["1", "--unit", "1", "--price", "120", "--fraction", "0"]), (e) => e.code === "VALIDATION");
+    });
+});
+test("exit --fraction banks half and leaves the trade open", async () => {
+    await withHarness(async () => {
+        await handle("open", OPEN_ARGS);
+        const out = await handle("exit", [
+            "1", "--unit", "1", "--price", "120", "--fraction", "0.5",
+        ]);
+        assert.equal(out.partial, true);
+        assert.equal(out.closed_notional, 500);
+        assert.equal(out.remaining_notional, 500);
+        assert.equal(out.trade.status, "open");
+        assert.equal(out.summary.open_units, 1);
+        assert.equal(out.summary.closed_units, 1);
+        assert.equal(out.summary.avg_entry, 100);
+    });
+});
 test("--size auto and --stop auto use the score plan sizing", async () => {
     await withHarness(async (file) => {
         // Seed a session with a bullish score plan for BTC.

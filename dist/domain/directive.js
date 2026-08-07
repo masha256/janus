@@ -54,6 +54,11 @@ export function planResults(plan) {
         r["stop_rationale"] = plan.stop_plan.rationale;
         if (plan.stop_plan.new_stop !== undefined)
             r["stop_new_stop"] = plan.stop_plan.new_stop;
+        if (plan.stop_plan.event !== undefined)
+            r["stop_event"] = plan.stop_plan.event;
+        if (plan.stop_plan.trim_fraction !== undefined) {
+            r["stop_trim_fraction"] = plan.stop_plan.trim_fraction;
+        }
     }
     if (plan.sizing_plan) {
         r["sizing_suggested_notional"] = plan.sizing_plan.suggested_notional;
@@ -103,6 +108,10 @@ export function scorePlanFromResults(results) {
             affected_units: String(results["stop_affected_units"] ?? "all"),
             rationale: String(results["stop_rationale"] ?? ""),
             new_stop: results["stop_new_stop"] === undefined ? undefined : Number(results["stop_new_stop"]),
+            event: results["stop_event"],
+            trim_fraction: results["stop_trim_fraction"] === undefined
+                ? undefined
+                : Number(results["stop_trim_fraction"]),
         };
     }
     const trimTarget = results["trim_target_units"];

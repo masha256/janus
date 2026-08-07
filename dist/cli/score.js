@@ -10,7 +10,7 @@ import { resolveParams } from "../domain/params.js";
 import { deriveScore } from "../domain/score.js";
 import { formatPosition, planResults } from "../domain/directive.js";
 import { assertPhaseOrder, nowIso } from "../domain/session.js";
-import { bookHeat } from "../db/repo/trade.js";
+import { bookHeat, openTradeForAsset } from "../db/repo/trade.js";
 import { pairs, readText, required, unknownVerb } from "./args.js";
 import { collect, handler, withDb } from "./command.js";
 import { JanusError } from "../output.js";
@@ -82,7 +82,9 @@ function record(symbol, opts) {
         // Everything the session already concluded, top down, plus the whole book.
         // The previous score is loaded so the persistence rule can resist flip-flopping.
         const previous = previousScore(db, asset.id, session.session_date);
-        const recent = recentScores(db, asset.id, session.session_date, params["signal_persist_days"] ?? 2);
+        // The window must cover the deepest gate that reads it, not just persistence.
+        const recentDays = Math.max(params["signal_persist_days"] ?? 2, params["decay_persist_days"] ?? 2);
+        const recent = recentScores(db, asset.id, session.session_date, recentDays);
         const screen = getScreen(db, session.session_date, asset.id);
         const context = {
             macro: getMacro(db, session.session_date),
@@ -104,6 +106,7 @@ function record(symbol, opts) {
             account_capital: params["account_capital"] ?? 0,
             current_heat: bookHeat(db),
             previous_score: previous,
+            open_trade: openTradeForAsset(db, asset.id),
         };
         const { direction, conviction, directive, plan, results } = deriveScore(factors, context, params);
         const position = positionOf(db, asset.id);

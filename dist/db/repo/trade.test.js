@@ -4,7 +4,7 @@ import { openDb } from "../connect.js";
 import { migrate } from "../migrate.js";
 import { upsertMarkets } from "./market.js";
 import { addAsset, requireAssetBySymbol } from "./asset.js";
-import { openTrade, addUnit, setStop, exitUnits, getTrade, listTrades } from "./trade.js";
+import { openTrade, addUnit, setStop, exitUnits, getTrade, listTrades, partialExitUnit, openTradeForAsset } from "./trade.js";
 import { positionOf } from "./score.js";
 const NOW = "2026-07-31T12:00:00Z";
 const DATE = "2026-07-31";
@@ -127,5 +127,100 @@ test("positionOf reports flat once a trade's units are all exited", () => {
     assert.deepEqual(positionOf(db, asset_id), { side: "long", units: 1 });
     exitUnits(db, id, 130, DATE);
     assert.deepEqual(positionOf(db, asset_id), { side: null, units: 0 });
+    db.close();
+});
+test("partialExitUnit splits a unit and preserves avg entry", () => {
+    const db = fresh();
+    const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
+    // input: entry 100, notional 1000, risk 100, stop 90 -> size 10
+    const res = partialExitUnit(db, id, 1, 120, DATE, 0.5);
+    assert.equal(res.closed_notional, 500);
+    assert.equal(res.remaining_notional, 500);
+    assert.equal(res.closed_seq, 2);
+    const t = getTrade(db, id);
+    assert.equal(t.trade.status, "open", "a partial must not close the trade");
+    assert.equal(t.summary.open_units, 1);
+    assert.equal(t.summary.closed_units, 1);
+    assert.equal(t.summary.total_notional, 500);
+    assert.equal(t.summary.avg_entry, 100, "both halves share entry_price, so avg entry is unchanged");
+    // closed slice: size 500/100 = 5, (120 - 100) * 5 = 100
+    assert.equal(t.summary.realized_pnl, 100);
+    // remaining: size 5, (100 - 90) * 5 = 50
+    assert.equal(t.summary.open_risk, 50);
+    const open = t.units.find((u) => u.seq === 1);
+    assert.equal(open.status, "open");
+    assert.equal(open.partial_exited, 1, "the open remainder carries the ladder's latch");
+    assert.equal(open.risk, 50);
+    db.close();
+});
+test("partial halves sum to the original notional exactly", () => {
+    const db = fresh();
+    const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
+    const res = partialExitUnit(db, id, 1, 120, DATE, 1 / 3);
+    assert.equal(res.closed_notional + res.remaining_notional, 1000);
+    db.close();
+});
+test("a partial on an already-partial unit compounds against current notional", () => {
+    const db = fresh();
+    const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
+    partialExitUnit(db, id, 1, 120, DATE, 0.5); // 1000 -> 500
+    const res = partialExitUnit(db, id, 1, 130, DATE, 0.5); // 500 -> 250
+    assert.equal(res.closed_notional, 250);
+    assert.equal(res.remaining_notional, 250);
+    db.close();
+});
+test("partialExitUnit rejects fractions outside (0,1) and unknown units", () => {
+    const db = fresh();
+    const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
+    for (const f of [0, 1, -0.5, 1.5]) {
+        assert.throws(() => partialExitUnit(db, id, 1, 120, DATE, f), /fraction/i, `fraction ${f}`);
+    }
+    assert.throws(() => partialExitUnit(db, id, 99, 120, DATE, 0.5), /no open unit/i);
+    db.close();
+});
+test("openTradeForAsset returns null when flat", () => {
+    const db = fresh();
+    assert.equal(openTradeForAsset(db, requireAssetBySymbol(db, "BTC").id), null);
+    db.close();
+});
+test("openTradeForAsset returns the trade with its units", () => {
+    const db = fresh();
+    const assetId = requireAssetBySymbol(db, "BTC").id;
+    const id = openTrade(db, { ...input, asset_id: assetId }, NOW);
+    addUnit(db, id, { entry_on: DATE, price: 110, stop: 100, risk: 100, notional: 1100 });
+    const state = openTradeForAsset(db, assetId);
+    assert.equal(state.direction, "long");
+    assert.equal(state.entry_price, 100, "entry_price is the trade's initial_price");
+    assert.equal(state.initial_risk, 100);
+    assert.equal(state.opened_on, DATE);
+    assert.equal(state.units.length, 2);
+    db.close();
+});
+test("openTradeForAsset includes closed units, so the ladder can see prior exits", () => {
+    const db = fresh();
+    const assetId = requireAssetBySymbol(db, "BTC").id;
+    const id = openTrade(db, { ...input, asset_id: assetId }, NOW);
+    partialExitUnit(db, id, 1, 120, DATE, 0.5);
+    const state = openTradeForAsset(db, assetId);
+    assert.equal(state.units.length, 2);
+    assert.equal(state.units.filter((u) => u.status === "closed").length, 1);
+    assert.equal(state.units.find((u) => u.seq === 1)?.partial_exited, 1);
+    db.close();
+});
+test("openTradeForAsset returns null once the trade closes", () => {
+    const db = fresh();
+    const assetId = requireAssetBySymbol(db, "BTC").id;
+    const id = openTrade(db, { ...input, asset_id: assetId }, NOW);
+    exitUnits(db, id, 120, DATE);
+    assert.equal(openTradeForAsset(db, assetId), null);
+    db.close();
+});
+test("a short books a gain when price falls", () => {
+    const db = fresh();
+    const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id, direction: "short", stop: 110 }, NOW);
+    partialExitUnit(db, id, 1, 80, DATE, 0.5);
+    const t = getTrade(db, id);
+    // size 5, (80 - 100) * 5 * -1 = 100
+    assert.equal(t.summary.realized_pnl, 100);
     db.close();
 });

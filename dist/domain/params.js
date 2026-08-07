@@ -32,6 +32,9 @@ export const DEFAULT_PARAMS = {
     signal_direction_exit: 1.0,
     // persistenceGate — how many run-days the signalGate must have passed.
     signal_persist_days: 2,
+    // decayGate — conviction floor and how many run-days below it triggers decay.
+    decay_conviction_floor: 4,
+    decay_persist_days: 2,
     // trendGate — explicit 20/50 MA band thresholds and late-trend caution.
     // Long: px_vs_sma20 > t20_long and px_vs_sma50 < t50_long -> starter;
     //       px_vs_sma20 > t20_long and px_vs_sma50 >= t50_long -> pass.

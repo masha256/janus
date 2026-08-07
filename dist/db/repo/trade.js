@@ -88,6 +88,73 @@ export function exitUnits(db, tradeId, price, exitOn, seq, funding) {
         throw e;
     }
 }
+/**
+ * Bank part of one unit. The closed slice becomes its own row rather than a
+ * stored P&L figure on the survivor, so every total in trade-math stays
+ * computed on read. Both rows keep the original entry price, which is what
+ * leaves avg_entry untouched across the split.
+ */
+export function partialExitUnit(db, tradeId, seq, price, exitOn, fraction, funding) {
+    requireTrade(db, tradeId);
+    if (!(fraction > 0 && fraction < 1)) {
+        throw new JanusError("VALIDATION", `fraction must be greater than 0 and less than 1, got ${fraction}`);
+    }
+    db.exec("BEGIN");
+    try {
+        const unit = db
+            .prepare("SELECT * FROM trade_unit WHERE trade_id = ? AND seq = ? AND status = 'open'")
+            .get(tradeId, seq);
+        if (unit === undefined) {
+            throw new JanusError("VALIDATION", `no open unit ${seq} on trade ${tradeId}`);
+        }
+        // Subtract rather than multiply twice, so the two halves sum to the original
+        // exactly instead of drifting by a float ulp.
+        const closedNotional = unit.notional * fraction;
+        const closedRisk = unit.risk * fraction;
+        const remainingNotional = unit.notional - closedNotional;
+        const remainingRisk = unit.risk - closedRisk;
+        const max = db
+            .prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM trade_unit WHERE trade_id = ?")
+            .get(tradeId);
+        const closedSeq = max.seq + 1;
+        db.prepare(`INSERT INTO trade_unit
+         (trade_id, seq, entry_on, entry_price, notional, risk, stop, status,
+          exit_on, exit_price, funding, tag, partial_exited)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'closed', ?, ?, ?, ?, 1)`).run(tradeId, closedSeq, unit.entry_on, unit.entry_price, closedNotional, closedRisk, unit.stop, exitOn, price, funding ?? 0, unit.tag);
+        db.prepare("UPDATE trade_unit SET notional = ?, risk = ?, partial_exited = 1 WHERE trade_id = ? AND seq = ?").run(remainingNotional, remainingRisk, tradeId, seq);
+        db.exec("COMMIT");
+        return {
+            closed_seq: closedSeq,
+            closed_notional: closedNotional,
+            remaining_notional: remainingNotional,
+        };
+    }
+    catch (e) {
+        db.exec("ROLLBACK");
+        throw e;
+    }
+}
+/**
+ * The open trade for an asset with every unit, for the stop ladder. The
+ * trade-level counterpart to positionOf, which reports only side and count.
+ * Closed units come along: the ladder reads prior exits to decide which rung
+ * it is on.
+ */
+export function openTradeForAsset(db, assetId) {
+    const row = db
+        .prepare(`SELECT id, direction, initial_price, initial_risk, opened_on
+       FROM trade WHERE asset_id = ? AND status = 'open'`)
+        .get(assetId);
+    if (row === undefined)
+        return null;
+    return {
+        direction: row.direction,
+        units: unitsOf(db, row.id),
+        entry_price: row.initial_price,
+        initial_risk: row.initial_risk,
+        opened_on: row.opened_on,
+    };
+}
 export function getTrade(db, tradeId) {
     const trade = requireTrade(db, tradeId);
     const units = unitsOf(db, tradeId);

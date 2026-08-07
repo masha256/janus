@@ -1,3 +1,4 @@
+import { scorePlanFromResults } from "../../domain/directive.js";
 import { metricsByEntity, replaceMetrics } from "./metric.js";
 /**
  * Flagged this session, unioned with anything carrying an open trade. An open
@@ -81,7 +82,7 @@ export function recentScores(db, assetId, beforeDate, limit) {
         const metrics = metricsByEntity(db, "score_metric", "asset_id", row.session_date);
         const results = metricsByEntity(db, "score_result", "asset_id", row.session_date);
         const r = results.get(row.asset_id) ?? {};
-        const plan = scorePlanFromResultsStatic(r);
+        const plan = scorePlanFromResults(r);
         return {
             direction: row.direction,
             conviction: row.conviction,
@@ -129,7 +130,7 @@ export function previousScore(db, assetId, beforeDate) {
     const metrics = metricsByEntity(db, "score_metric", "asset_id", row.session_date);
     const results = metricsByEntity(db, "score_result", "asset_id", row.session_date);
     const r = results.get(row.asset_id) ?? {};
-    const plan = scorePlanFromResultsStatic(r);
+    const plan = scorePlanFromResults(r);
     return {
         direction: row.direction,
         conviction: row.conviction,
@@ -148,61 +149,6 @@ export function previousScore(db, assetId, beforeDate) {
         results: r,
     };
 }
-function scorePlanFromResultsStatic(results) {
-    const directive = results["plan_directive"];
-    if (directive === undefined)
-        return undefined;
-    const size_tier = results["size_tier"];
-    if (size_tier === undefined)
-        return undefined;
-    const plan = {
-        directive,
-        reason: String(results["directive_reason"] ?? ""),
-        size_tier,
-        signal_gate: results["signal_gate"] ?? "fail",
-        persistence_gate: results["persistence_gate"] ?? "fail",
-        trend_gate: results["trend_gate"] ?? "fail",
-        binary_gate: results["binary_gate"] ?? "pass",
-        heat_gate: results["heat_gate"] ?? "pass",
-        flipflop_gate: results["flipflop_gate"] ?? "n/a",
-        regime_trigger: results["regime_trigger"] ?? "none",
-        persistence_rule: results["persistence_rule"] ?? undefined,
-    };
-    const entrySide = results["entry_side"];
-    if (entrySide !== undefined) {
-        plan.entry_plan = {
-            side: entrySide,
-            max_units: Number(results["entry_max_units"] ?? 0),
-        };
-    }
-    const stopAction = results["stop_action"];
-    if (stopAction !== undefined) {
-        plan.stop_plan = {
-            action: stopAction,
-            affected_units: String(results["stop_affected_units"] ?? "all"),
-            rationale: String(results["stop_rationale"] ?? ""),
-        };
-    }
-    const trimTarget = results["trim_target_units"];
-    if (trimTarget !== undefined) {
-        plan.trim_plan = {
-            target_units: Number(trimTarget),
-            which: String(results["trim_which"] ?? "oldest"),
-        };
-    }
-    const sizingNotional = results["sizing_suggested_notional"];
-    if (sizingNotional !== undefined) {
-        plan.sizing_plan = {
-            suggested_notional: Number(sizingNotional),
-            risk_dollars: Number(results["sizing_risk_dollars"] ?? 0),
-            stop_distance_pct: Number(results["sizing_stop_distance_pct"] ?? 0),
-            stop_price: Number(results["sizing_stop_price"] ?? 0),
-            heat_after_trade: Number(results["sizing_heat_after_trade"] ?? 0),
-            per_asset_cap_dollars: Number(results["sizing_per_asset_cap_dollars"] ?? 0),
-        };
-    }
-    return plan;
-}
 export function getScore(db, date, assetId) {
     const row = db
         .prepare(`SELECT a.symbol, a.class, s.* FROM score s
@@ -214,7 +160,7 @@ export function getScore(db, date, assetId) {
     const metrics = metricsByEntity(db, "score_metric", "asset_id", date);
     const results = metricsByEntity(db, "score_result", "asset_id", date);
     const r = results.get(row.asset_id) ?? {};
-    const plan = scorePlanFromResultsStatic(r);
+    const plan = scorePlanFromResults(r);
     return { ...row, metrics: metrics.get(row.asset_id) ?? {}, results: r, plan };
 }
 export function listScores(db, date) {

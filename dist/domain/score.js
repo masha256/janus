@@ -1,7 +1,8 @@
 import { JanusError } from "../output.js";
 import { num, requireNum } from "./metrics.js";
-import { actionableNewSignal, heatGate, regimeTriggerState, runGates } from "./gates.js";
+import { actionableNewSignal, decayGate, heatGate, regimeTriggerState, runGates } from "./gates.js";
 import { sizeFromRiskAndStop, stopDistancePct, stopFromAtr } from "./sizing.js";
+import { deriveLadderPlan } from "./ladder.js";
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 const boolParam = (params, key) => (params[key] ?? 0) !== 0;
 /**
@@ -102,9 +103,10 @@ export function deriveScore(metrics, context, params) {
     // The stored/displayed conviction is an integer 1..10; the ladder should
     // work with that same rounded value so gates and the final score agree.
     const roundedConviction = Math.round(conviction);
-    const { plan, sizingPlan } = derivePlan(direction, roundedConviction, ownPosition, context, catalyst, params);
-    if (sizingPlan)
-        plan.sizing_plan = sizingPlan;
+    // derivePlan already attaches sizing_plan to the branches that build one, and
+    // it is the last word on the plan: re-attaching it here would resurrect a
+    // sizing instruction on a plan the stop ladder escalated to EXIT.
+    const { plan } = derivePlan(direction, roundedConviction, ownPosition, context, catalyst, params);
     return {
         direction,
         conviction: roundedConviction,
@@ -218,6 +220,22 @@ function derivePlan(direction, conviction, position, context, catalyst, params) 
         recentScores: context.recent_scores ?? [],
         currentHeat: context.current_heat ?? 0,
         proposedHeat: 0,
+    });
+    // The stop ladder, for an asset we actually hold. It owns stop management;
+    // the directive branches below own the exit decision.
+    const openTrade = context.open_trade ?? null;
+    const ladder = openTrade === null ? null : deriveLadderPlan({
+        direction: openTrade.direction,
+        units: openTrade.units,
+        entryPrice: openTrade.entry_price,
+        initialRisk: openTrade.initial_risk,
+        coverage: context.asset.coverage,
+        openedOn: openTrade.opened_on,
+        today: context.session_date,
+        addWindowOpen: openTrade.units.some((u) => u.partial_exited === 1),
+        lateTrend: trend === "late_trend",
+        decaySignal: decayGate(conviction, position.side, context.recent_scores ?? [], params),
+        params,
     });
     const blocked = signal === "fail" || persistence === "fail" || trend === "fail" || binary === "blocked" || initialHeat === "blocked" || flipflop === "blocked";
     const starter = !blocked && trend === "starter";
@@ -455,7 +473,44 @@ function derivePlan(direction, conviction, position, context, catalyst, params) 
             }
         }
     }
-    return { plan, sizingPlan };
+    return { plan: applyLadder(plan, ladder), sizingPlan };
+}
+/**
+ * Overlay the stop ladder on a directive plan. The directive owns whether we
+ * are getting out; the ladder owns how the stop is managed while we are in.
+ * The two exceptions are time_stop and decay_exit, which are unconditional
+ * risk rules — they escalate rather than sit quietly under a HOLD.
+ */
+function applyLadder(plan, ladder) {
+    if (ladder === null)
+        return plan;
+    if (plan.directive === "EXIT" || plan.directive === "STAND_ASIDE")
+        return plan;
+    const next = {
+        ...plan,
+        stop_plan: {
+            action: ladder.action,
+            affected_units: ladder.affected_units,
+            rationale: ladder.rationale,
+            event: ladder.event,
+            ...(ladder.new_stop === undefined ? {} : { new_stop: ladder.new_stop }),
+            ...(ladder.trim_fraction === undefined ? {} : { trim_fraction: ladder.trim_fraction }),
+        },
+    };
+    if (ladder.event === "time_stop" || ladder.event === "decay_exit") {
+        return {
+            ...next,
+            directive: "EXIT",
+            reason: `${next.reason} (ladder: ${ladder.rationale})`,
+            // "Exit everything" must not also carry the pre-escalation directive's
+            // add/trim/size instructions: an ADD's sizing_plan or a TRIM's trim_plan
+            // would render alongside the exit as a contradictory order.
+            entry_plan: undefined,
+            trim_plan: undefined,
+            sizing_plan: undefined,
+        };
+    }
+    return next;
 }
 function buildProposedHeat(position, side, context, params, sizeTier) {
     if (position.side !== null)

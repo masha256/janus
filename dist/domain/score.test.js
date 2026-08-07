@@ -310,3 +310,160 @@ test("persistence rule allows EXIT when divergence is actionable", () => {
     assert.equal(got.directive, "EXIT");
     assert.equal(got.plan.persistence_rule, "fresh_signal");
 });
+/**
+ * BTC long, one open unit: entry 100, notional 1000 (size 10), risk 100.
+ *
+ * `stop` matters more than it looks. The ladder checks the breakeven rung
+ * before partial or runner, and it fires whenever the oldest unit's stop is
+ * still below entry. A fixture left at stop 90 therefore returns `breakeven`
+ * no matter how far price has run. Pass stop 100 — already at breakeven — to
+ * let a test reach the later rungs.
+ */
+function contextWithOpenTrade(opts) {
+    return {
+        ...ctx(0, null),
+        positions: [{ asset_id: 1, symbol: "BTC", side: "long", units: 1 }],
+        asset: { ...flat.asset, coverage: coverage({ mark_price: opts.mark, atr14: opts.atr14 }) },
+        open_trade: {
+            direction: "long",
+            units: [{
+                    seq: 1,
+                    entry_price: 100,
+                    notional: 1000,
+                    risk: 100,
+                    stop: opts.stop ?? 90,
+                    status: "open",
+                    exit_price: null,
+                    funding: 0,
+                    tag: null,
+                    partial_exited: opts.partialExited === true ? 1 : 0,
+                }],
+            entry_price: 100,
+            initial_risk: 100,
+            opened_on: opts.openedOn ?? "2026-07-01",
+        },
+    };
+}
+/** Flat, gates passing, so the INITIATE branch's own stop_plan is what we see. */
+function contextFlat() {
+    const prev = {
+        direction: 1.8, conviction: 9, directive: "STAND_ASIDE",
+        plan: {
+            directive: "STAND_ASIDE", reason: "prior signal", size_tier: "blocked",
+            signal_gate: "pass", persistence_gate: "fail", trend_gate: "pass",
+            binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a",
+        },
+        results: {},
+    };
+    return { ...ctxWithPosition({ side: null, units: 0 }, coverage(), prev), open_trade: null };
+}
+const holdMetrics = m(0, 1, 0, 50, false, false);
+const exitMetrics = m(-2, -2, -2, 50, false, false);
+const initiateMetrics = m(2, 2, 1, 50, false, false);
+/** Still long, but conviction lands under conv_hold / the decay floor. */
+const lowConvictionMetrics = m(1, 0, 0, 50, false, false, 0.3);
+const PARAMS = DEFAULT_PARAMS;
+test("a HOLD takes its stop_plan from the ladder", () => {
+    // stop 100 = already at breakeven, mark 130 = +3R with a partial banked,
+    // so the ladder lands on the runner rung.
+    const c = contextWithOpenTrade({ mark: 130, atr14: 5, stop: 100, partialExited: true });
+    const { plan } = deriveScore(holdMetrics, c, PARAMS);
+    assert.equal(plan.directive, "HOLD");
+    assert.equal(plan.stop_plan?.event, "runner");
+    assert.equal(plan.stop_plan?.action, "trail");
+    // mark 130 - 2 * atr 5 = 120, floored at entry 100
+    assert.equal(plan.stop_plan?.new_stop, 120);
+    assert.notEqual(plan.stop_plan?.rationale, "review stop/exit plan, no change today");
+});
+test("a stop still below entry puts the ladder on the breakeven rung", () => {
+    const c = contextWithOpenTrade({ mark: 130, atr14: 5, stop: 90 });
+    const { plan } = deriveScore(holdMetrics, c, PARAMS);
+    assert.equal(plan.stop_plan?.event, "breakeven");
+    assert.equal(plan.stop_plan?.action, "move_to_breakeven");
+    assert.equal(plan.stop_plan?.new_stop, 100);
+});
+test("a ladder time_stop escalates a HOLD to EXIT", () => {
+    // opened 2026-01-01 against session_date 2026-07-31 is well past 42 days
+    const c = contextWithOpenTrade({ mark: 105, atr14: 5, stop: 100, openedOn: "2026-01-01" });
+    const { plan } = deriveScore(holdMetrics, c, PARAMS);
+    assert.equal(plan.directive, "EXIT");
+    assert.equal(plan.stop_plan?.event, "time_stop");
+    assert.match(plan.reason, /\(ladder: position open \d+ days, time stop reached\)/);
+});
+test("an EXIT directive keeps its own stop_plan", () => {
+    const c = contextWithOpenTrade({ mark: 130, atr14: 5, stop: 100, partialExited: true });
+    const { plan } = deriveScore(exitMetrics, c, PARAMS);
+    assert.equal(plan.directive, "EXIT");
+    assert.equal(plan.stop_plan?.rationale, "exit entire position");
+    assert.equal(plan.stop_plan?.event, undefined, "the ladder must not overwrite an EXIT");
+});
+test("with no open trade the entry plan is unchanged", () => {
+    const { plan } = deriveScore(initiateMetrics, contextFlat(), PARAMS);
+    assert.equal(plan.directive, "INITIATE");
+    assert.equal(plan.stop_plan?.rationale, "initial stop set at entry");
+    assert.equal(plan.stop_plan?.event, undefined);
+});
+test("a banked partial moves the ladder off the partial rung", () => {
+    const noPartial = contextWithOpenTrade({ mark: 130, atr14: 5, stop: 100, partialExited: false });
+    assert.equal(deriveScore(holdMetrics, noPartial, PARAMS).plan.stop_plan?.event, "partial");
+    const banked = contextWithOpenTrade({ mark: 130, atr14: 5, stop: 100, partialExited: true });
+    assert.equal(deriveScore(holdMetrics, banked, PARAMS).plan.stop_plan?.event, "runner");
+});
+test("the partial rung passes the trim fraction through", () => {
+    const c = contextWithOpenTrade({ mark: 130, atr14: 5, stop: 100, partialExited: false });
+    const { plan } = deriveScore(holdMetrics, c, PARAMS);
+    assert.equal(plan.stop_plan?.trim_fraction, 0.5);
+    assert.equal(plan.stop_plan?.affected_units, "newest");
+});
+/** A prior same-side score strong enough to satisfy the persistence gate. */
+const strongPrior = {
+    direction: 1.5, conviction: 8, directive: "ADD",
+    plan: {
+        directive: "ADD", reason: "prior", size_tier: "full",
+        signal_gate: "pass", persistence_gate: "pass", trend_gate: "pass",
+        binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a",
+    },
+    results: {},
+};
+/** A prior same-side score with conviction under the decay floor. */
+const decayingPrior = {
+    ...strongPrior, direction: 0.3, conviction: 2, directive: "TRIM",
+};
+test("an escalated EXIT drops the ADD's sizing_plan and entry_plan", () => {
+    // Control: same fixture opened recently is an ADD that really does carry sizing.
+    const fresh = {
+        ...contextWithOpenTrade({ mark: 130, atr14: 5, stop: 100, partialExited: true }),
+        recent_scores: [strongPrior],
+    };
+    const control = deriveScore(initiateMetrics, fresh, PARAMS).plan;
+    assert.equal(control.directive, "ADD");
+    assert.ok(control.sizing_plan, "control ADD carries a sizing_plan to be dropped");
+    // Same thing, 42+ days old: the ladder's time stop escalates it to EXIT.
+    const stale = {
+        ...contextWithOpenTrade({
+            mark: 130, atr14: 5, stop: 100, partialExited: true, openedOn: "2026-01-01",
+        }),
+        recent_scores: [strongPrior],
+    };
+    const { plan } = deriveScore(initiateMetrics, stale, PARAMS);
+    assert.equal(plan.directive, "EXIT");
+    assert.equal(plan.stop_plan?.event, "time_stop");
+    assert.equal(plan.sizing_plan, undefined, "an exit-everything plan must not size a new add");
+    assert.equal(plan.entry_plan, undefined);
+});
+test("an escalated EXIT drops the TRIM's trim_plan", () => {
+    const twoUnits = (recent) => ({
+        ...contextWithOpenTrade({ mark: 130, atr14: 5, stop: 100, partialExited: true }),
+        positions: [{ asset_id: 1, symbol: "BTC", side: "long", units: 2 }],
+        recent_scores: recent,
+    });
+    // Control: low conviction alone is a TRIM that really does carry a trim_plan.
+    const control = deriveScore(lowConvictionMetrics, twoUnits([]), PARAMS).plan;
+    assert.equal(control.directive, "TRIM");
+    assert.equal(control.trim_plan?.target_units, 1, "control TRIM carries a trim_plan to be dropped");
+    // A second sub-floor day on the same side trips decayGate, so the ladder escalates.
+    const { plan } = deriveScore(lowConvictionMetrics, twoUnits([decayingPrior]), PARAMS);
+    assert.equal(plan.directive, "EXIT");
+    assert.equal(plan.stop_plan?.event, "decay_exit");
+    assert.equal(plan.trim_plan, undefined, "an exit-everything plan must not also trim to N-1");
+});
