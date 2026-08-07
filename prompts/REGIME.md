@@ -20,21 +20,54 @@ a non-zero status so the cron job surfaces the failure.
 
 ## Time anchor
 
-All data must be anchored to **the previous U.S. market close at 4:00 PM Eastern
-Time**. For a job running on calendar day `D`, read the market snapshot as of
-`D-1 16:00 ET`. This makes the regime reproducible if the job is re-run during
-the same calendar day.
+The anchor is **today at 10:00 AM Eastern Time** — thirty minutes after the U.S.
+equity open, so the opening auction has cleared and overnight news has had time
+to price in. For a job running on calendar day `D`, read the market as of
+`D 10:00 ET`.
 
 If a data point covers a window (e.g. "last 3 months"), use the window ending at
-that 4 PM anchor.
+the anchor.
+
+### The news cutoff
+
+**10:00 ET is a hard cutoff, not a preference.** Anything published after it does
+not exist for today's read.
+
+- A story, print, or headline timestamped after 10:00 ET may be mentioned in the
+  `summary` as a flag for tomorrow, but **must not move any number today**.
+- If you cannot establish when something was published, treat it as after the
+  cutoff and exclude it.
+- Series published on a daily cadence — high-yield OAS, breadth, the official par
+  yield curve — have no 10:00 value. Use the most recent published figure and say
+  which session it is from. That is a correct answer, not a gap.
+
+### Prices are newer than news — this is expected
+
+You run after the anchor, so live prices are ahead of the news you are allowed to
+use. You will see moves you cannot explain from permitted sources.
+
+**Do not go looking for the explanation.** An unexplained move since the cutoff is
+an observation; record it as one ("tape sold off into the anchor with no
+attributable catalyst"). Searching for the story behind it is how post-cutoff news
+gets back in through the side door, and it is the single most likely way this
+read becomes dependent on what minute the job happened to run.
 
 ## Pre-flight
 
-List clusters from the janus roster so you know how many cluster reads are
-required:
-```bash
-janus cluster list
-```
+1. List clusters from the janus roster so you know how many cluster reads are
+   required:
+   ```bash
+   janus cluster list
+   ```
+
+2. Read the previous session's regime numbers. These are your starting point for
+   the whipsaw guard below — you are adjusting yesterday's read, not writing a
+   fresh one:
+   ```bash
+   janus macro reads --date <previous session date>
+   janus cluster reads --date <previous session date>
+   ```
+   If no prior session exists, say so in the summary and score from scratch.
 
 ## Phase 1 — Macro read
 
@@ -60,10 +93,11 @@ Be honest about how rare the tails are. Most days are not interesting.
 | **−0.8 to −1.6** | Clear risk-off. Conditions tightening, credit widening, breadth deteriorating, or policy uncertainty overhanging |
 | **−1.7 to −2.0** | Panic. Vol spiking with an inverted front end, credit gapping, correlations to one, forced-liquidation behavior. Rare |
 
-Guard against two failure modes:
+Guard against three failure modes:
 
 - **Tail inflation.** Do not print beyond ±1.7 for an ordinary bad week or a strong rally. Reserve the extremes for conditions you could name in a sentence and defend with three cited numbers. If you can't, you're at ±1.2, not ±1.9.
 - **Narrative drift.** A worrying story is not a regime change. Ask what *number* moved since the last anchor. If none did, the reading holds.
+- **Whipsaw.** Start from yesterday's recorded regime, not from a blank sheet. Moving more than **±0.5** off it requires naming the specific number that moved and citing both its prior and current values. Absent that, stay within ±0.5. A regime that swings a full point on consecutive days without a cited driver is noise being recorded as signal, and it propagates: the `regime_smile` derived downstream is steepest between ±1.3 and ±1.7, so a small unjustified wobble there produces a large swing in every score.
 
 ### What to read
 
@@ -126,10 +160,10 @@ and `description` from `janus cluster list` to understand what it represents.
 
 3. **A concrete signal is required for any non-zero delta.** A delta of ±0.2 or more
    must be backed by at least one specific cluster-level observation. Valid signals:
-   - **Relative trend:** cluster aggregate price is above/below its 20-day and 50-day moving averages vs the broad index.
+   - **Relative trend:** cluster aggregate price is above/below its 20-day and 50-day moving averages vs the broad index. Do not eyeball this — janus already computed it. Today's coverage has not run yet, but the previous session's row carries `px_vs_sma20`, `px_vs_sma50`, and the `cross_*` states, and a moving average moves by one bar overnight: `janus coverage list --date <previous session date>`. Cite those numbers rather than estimating from a chart.
    - **Momentum acceleration:** volume-weighted momentum (price change × relative volume) is in the top/bottom 25% of the last 90 days.
    - **Funding / social:** perp funding rate, social volume, or sentiment has shifted by more than 1 standard deviation vs its 30-day cluster baseline.
-   - **Live catalyst:** a scheduled or surprise event directly affecting the cluster (earnings, unlock, regulatory ruling, protocol upgrade, etc.) within the 4 PM anchor window.
+   - **Live catalyst:** a scheduled or surprise event directly affecting the cluster (earnings, unlock, regulatory ruling, protocol upgrade, etc.) published before the 10:00 ET cutoff.
 
 4. **Do not double-count the macro.** The dollar, 10-year, VIX, credit spreads, and breadth are already in the macro regime. Only cluster-specific information should move the delta.
 
@@ -150,7 +184,7 @@ and `description` from `janus cluster list` to understand what it represents.
 - Whether the cluster's narrative is being amplified or questioned on social
   channels.
 - Any cluster-specific catalyst (event, unlock, earnings, regulatory headline)
-  near the 4 PM anchor.
+  published before the 10:00 ET cutoff.
 
 Do not invent prices or funding rates. If a cluster-specific signal is missing,
 treat it as neutral and state that in the summary.
@@ -183,7 +217,11 @@ janus cluster record crypto_defi --date $TODAY \
 
 - Do not record any metrics other than `regime` and `summary` for macro or
   cluster reads.
-- Do not proceed to coverage, screen, or score phases — that is a separate job.
-- Do not use today's live prices if the 4 PM anchor from the prior day is
-  available.
+- Do not run `janus coverage run`, or proceed to the screen or score phases. The
+  screen job owns coverage and runs it as its own first step. Fetching here would
+  stamp the phase early and leave the screen working from stale prices.
+- Do not let any news published after 10:00 ET move a number. Note it for
+  tomorrow instead.
+- Do not go hunting for the story behind a price move you cannot explain from
+  pre-cutoff sources. Record the move; leave the cause alone.
 - Do not estimate or hallucinate numbers. Declare gaps instead.

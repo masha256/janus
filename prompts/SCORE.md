@@ -22,6 +22,22 @@ Every command prints one JSON envelope to stdout:
 Stop on any `ok:false` envelope, report the `code` and `message`, and exit with
 a non-zero status so the cron job surfaces the failure.
 
+## Time anchor
+
+The session anchor is **today at 10:00 AM Eastern**, and it is a hard news
+cutoff. This is the last phase of the pipeline and the most exposed to drift,
+because the sources below are live.
+
+- **Nothing published after 10:00 ET may move a factor.** Note it in the
+  `rationale` as a flag for tomorrow and score without it. Undateable material
+  counts as post-cutoff.
+- **The coverage snapshot is the session's authoritative price.** Do not replace
+  it with a fresher quote you looked up. Two runs of this phase against the same
+  session must produce the same factors.
+- **Expect prices to be ahead of permitted news** and do not go looking for the
+  story that explains the gap. That search is the main way run time leaks into
+  the score.
+
 ## Pre-flight
 
 1. Ensure the session exists for the target date.
@@ -57,7 +73,9 @@ specific services, so it stays useful as data providers change.
   REGIME phase.
 
 Prefer primary or exchange-verified data over social inference. If two sources
-conflict, weight the one tied to a verifiable number at the 4 PM anchor.
+conflict, weight the one tied to a verifiable number at or before the anchor.
+Everything in this list is subject to the 10:00 ET cutoff — news feeds and social
+especially, since those are the sources that update between one run and the next.
 
 ## Command format
 

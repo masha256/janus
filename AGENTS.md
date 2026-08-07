@@ -31,6 +31,19 @@ Run the five phases in order, then surface any `INITIATE`, `ADD`, `TRIM`, or
 5. score record    (one decision per queued asset)
 ```
 
+The phases run in that order, but they are grouped into **two jobs**, split at the
+coverage boundary:
+
+| Job | Phases | Prompt |
+| --- | --- | --- |
+| Regime | 1–2 | `prompts/REGIME.md` |
+| Screen & score | 3–5 | `prompts/SCREEN.md`, `prompts/SCORE.md` |
+
+Coverage belongs to the second job and runs as its first step, so screening always
+works from prices fetched moments earlier rather than from whatever the clock gap
+between two jobs happened to be. The session anchor and news cutoff is **10:00 AM
+Eastern**; both jobs run after it.
+
 After scoring, call `janus score list` to see the full queue, then call
 `janus trade list --open` to see current positions. Compare the two and produce a
 short operator brief: new entries, adds, trims, exits, and anything that needs a

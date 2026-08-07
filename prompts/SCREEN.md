@@ -18,14 +18,41 @@ Every command prints one JSON envelope to stdout:
 Stop on any `ok:false` envelope, report the `code` and `message`, and exit with
 a non-zero status so the cron job surfaces the failure.
 
+## Time anchor
+
+The session anchor is **today at 10:00 AM Eastern**, and it is a hard news
+cutoff. This phase runs well after it, so two rules hold:
+
+- **News published after 10:00 ET does not exist for today's screen.** It may
+  appear in a `rationale` as a flag for tomorrow, but it must not move `score` or
+  `confidence`. If you cannot date something, treat it as after the cutoff.
+- **Prices are legitimately newer than news.** The coverage snapshot was fetched
+  after the cutoff, so you will see moves no permitted headline explains. Record
+  them as observations. Do not search for the cause — that is how post-cutoff news
+  re-enters, and it makes the screen depend on what minute the job ran.
+
 ## Pre-flight
 
-1. Verify the prior phases are stamped. The screen phase requires `coverage` to
-   be complete:
+This job owns the coverage phase as well as the screen. Run them in order and do
+not overlap them.
+
+1. Verify the regime phases are stamped. Coverage requires `macro` and `cluster`
+   to be complete:
    ```bash
    janus session status --date YYYY-MM-DD
    ```
-2. List the assets that have coverage today. These are the only assets you
+
+2. Fetch market data. This is the only networked command in the pipeline and it
+   fetches serially across the roster, so it may take a while:
+   ```bash
+   janus coverage run
+   ```
+   **Wait for this command to exit before continuing.** Do not start screening off
+   a partial fetch. Check the envelope: `phase_complete` must be `true`. Assets
+   listed in `skipped` had insufficient history — they are not errors, but they
+   will not appear in the next step and are not screened.
+
+3. List the assets that have coverage today. These are the only assets you
    screen:
    ```bash
    janus coverage list --date YYYY-MM-DD
@@ -78,8 +105,9 @@ confidence can flag.
 Screening is asset-specific. Consider:
 
 - **Price action vs MAs** using the coverage snapshot (20-, 50-, 200-day context).
-- **Momentum / volume** from the coverage snapshot and any additional intraday
-  data available at the 4 PM anchor.
+- **Momentum / volume** from the coverage snapshot, which is the session's
+  authoritative price source. Prefer it over any figure you look up yourself; a
+  re-run must not produce a different screen.
 - **Funding, open interest, social volume** for crypto/perp assets.
 - **Idiosyncratic catalysts** (earnings, product news, regulatory event, token
   unlock, governance vote, exchange listing/delisting).
