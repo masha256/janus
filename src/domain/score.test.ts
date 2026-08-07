@@ -555,6 +555,8 @@ function contextFlat(): ScoreContext {
 const holdMetrics = m(0, 1, 0, 50, false, false);
 const exitMetrics = m(-2, -2, -2, 50, false, false);
 const initiateMetrics = m(2, 2, 1, 50, false, false);
+/** Still long, but conviction lands under conv_hold / the decay floor. */
+const lowConvictionMetrics = m(1, 0, 0, 50, false, false, 0.3);
 const PARAMS = DEFAULT_PARAMS;
 
 test("a HOLD takes its stop_plan from the ladder", () => {
@@ -614,4 +616,63 @@ test("the partial rung passes the trim fraction through", () => {
   const { plan } = deriveScore(holdMetrics, c, PARAMS);
   assert.equal(plan.stop_plan?.trim_fraction, 0.5);
   assert.equal(plan.stop_plan?.affected_units, "newest");
+});
+
+/** A prior same-side score strong enough to satisfy the persistence gate. */
+const strongPrior: import("./score.ts").ScoreResult = {
+  direction: 1.5, conviction: 8, directive: "ADD",
+  plan: {
+    directive: "ADD", reason: "prior", size_tier: "full",
+    signal_gate: "pass", persistence_gate: "pass", trend_gate: "pass",
+    binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a",
+  },
+  results: {},
+};
+
+/** A prior same-side score with conviction under the decay floor. */
+const decayingPrior: import("./score.ts").ScoreResult = {
+  ...strongPrior, direction: 0.3, conviction: 2, directive: "TRIM",
+};
+
+test("an escalated EXIT drops the ADD's sizing_plan and entry_plan", () => {
+  // Control: same fixture opened recently is an ADD that really does carry sizing.
+  const fresh: ScoreContext = {
+    ...contextWithOpenTrade({ mark: 130, atr14: 5, stop: 100, partialExited: true }),
+    recent_scores: [strongPrior],
+  };
+  const control = deriveScore(initiateMetrics, fresh, PARAMS).plan;
+  assert.equal(control.directive, "ADD");
+  assert.ok(control.sizing_plan, "control ADD carries a sizing_plan to be dropped");
+
+  // Same thing, 42+ days old: the ladder's time stop escalates it to EXIT.
+  const stale: ScoreContext = {
+    ...contextWithOpenTrade({
+      mark: 130, atr14: 5, stop: 100, partialExited: true, openedOn: "2026-01-01",
+    }),
+    recent_scores: [strongPrior],
+  };
+  const { plan } = deriveScore(initiateMetrics, stale, PARAMS);
+  assert.equal(plan.directive, "EXIT");
+  assert.equal(plan.stop_plan?.event, "time_stop");
+  assert.equal(plan.sizing_plan, undefined, "an exit-everything plan must not size a new add");
+  assert.equal(plan.entry_plan, undefined);
+});
+
+test("an escalated EXIT drops the TRIM's trim_plan", () => {
+  const twoUnits = (recent: import("./score.ts").ScoreResult[]): ScoreContext => ({
+    ...contextWithOpenTrade({ mark: 130, atr14: 5, stop: 100, partialExited: true }),
+    positions: [{ asset_id: 1, symbol: "BTC", side: "long", units: 2 }],
+    recent_scores: recent,
+  });
+
+  // Control: low conviction alone is a TRIM that really does carry a trim_plan.
+  const control = deriveScore(lowConvictionMetrics, twoUnits([]), PARAMS).plan;
+  assert.equal(control.directive, "TRIM");
+  assert.equal(control.trim_plan?.target_units, 1, "control TRIM carries a trim_plan to be dropped");
+
+  // A second sub-floor day on the same side trips decayGate, so the ladder escalates.
+  const { plan } = deriveScore(lowConvictionMetrics, twoUnits([decayingPrior]), PARAMS);
+  assert.equal(plan.directive, "EXIT");
+  assert.equal(plan.stop_plan?.event, "decay_exit");
+  assert.equal(plan.trim_plan, undefined, "an exit-everything plan must not also trim to N-1");
 });

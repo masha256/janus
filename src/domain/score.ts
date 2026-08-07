@@ -186,7 +186,10 @@ export function deriveScore(
   // work with that same rounded value so gates and the final score agree.
   const roundedConviction = Math.round(conviction);
 
-  const { plan, sizingPlan } = derivePlan(
+  // derivePlan already attaches sizing_plan to the branches that build one, and
+  // it is the last word on the plan: re-attaching it here would resurrect a
+  // sizing instruction on a plan the stop ladder escalated to EXIT.
+  const { plan } = derivePlan(
     direction,
     roundedConviction,
     ownPosition,
@@ -194,7 +197,6 @@ export function deriveScore(
     catalyst,
     params,
   );
-  if (sizingPlan) plan.sizing_plan = sizingPlan;
 
   return {
     direction,
@@ -612,6 +614,12 @@ function applyLadder(plan: ScorePlan, ladder: LadderPlan | null): ScorePlan {
       ...next,
       directive: "EXIT",
       reason: `${next.reason} (ladder: ${ladder.rationale})`,
+      // "Exit everything" must not also carry the pre-escalation directive's
+      // add/trim/size instructions: an ADD's sizing_plan or a TRIM's trim_plan
+      // would render alongside the exit as a contradictory order.
+      entry_plan: undefined,
+      trim_plan: undefined,
+      sizing_plan: undefined,
     };
   }
   return next;
