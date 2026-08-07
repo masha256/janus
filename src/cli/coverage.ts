@@ -1,16 +1,20 @@
 import { Command } from "commander";
-import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
-import { eligibleAssets, requireSymbols } from "../db/repo/asset.ts";
+import { ensureSession, resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
+import { eligibleAssets, requireAssetBySymbol, requireSymbols } from "../db/repo/asset.ts";
 import { upsertCoverage, listCoverage } from "../db/repo/coverage.ts";
-import { computeCoverage } from "../domain/coverage.ts";
+import { backfillInputs, computeCoverage, type CoverageValues } from "../domain/coverage.ts";
 import { createLighterClient } from "../lighter/client.ts";
-import { assertPhaseOrder, nowIso } from "../domain/session.ts";
-import { csv, unknownVerb } from "./args.ts";
+import { assertPhaseOrder, nowIso, todayNY } from "../domain/session.ts";
+import { csv, finite, required, unknownVerb } from "./args.ts";
 import { type Emit, handler, withDb } from "./command.ts";
 import { JanusError } from "../output.ts";
 import type { AssetRow } from "../db/repo/asset.ts";
 
 type RunOpts = { asset?: string; date?: string; force?: boolean };
+type SetOpts = {
+  date: string; close: string; mark?: string; atr?: string;
+  pxVsSma20?: string; pxVsSma50?: string; pxVsSma200?: string; complete?: boolean;
+};
 
 /** Narrow the eligible set to an explicit symbol list, rejecting the whole call on any miss. */
 function select(eligible: AssetRow[], symbols: string[] | undefined): AssetRow[] {
@@ -32,7 +36,7 @@ function select(eligible: AssetRow[], symbols: string[] | undefined): AssetRow[]
 export function build(emit: Emit): Command {
   const cmd = new Command("coverage")
     .description("Market data for the session (phase 3) — the only phase that uses the network")
-    .action(() => { throw unknownVerb(undefined, "coverage", "run, list"); });
+    .action(() => { throw unknownVerb(undefined, "coverage", "run, set, list"); });
 
   cmd.command("run")
     .description("Fetch candles and a snapshot for every eligible asset")
@@ -41,6 +45,19 @@ export function build(emit: Emit): Command {
     .option("--force", "run out of phase order")
     .action(async (opts: RunOpts) => emit(await run(opts)));
 
+  cmd.command("set")
+    .description("Write a coverage row by hand — for testing scenarios, not the daily pipeline")
+    .argument("[symbol]", "market symbol")
+    .requiredOption("--date <YYYY-MM-DD>", "session to write")
+    .requiredOption("--close <N>", "the day's close; also the mark unless --mark is given")
+    .option("--mark <N>", "mark price; defaults to close")
+    .option("--atr <N>", "atr14, which the stop ladder needs to trail")
+    .option("--px-vs-sma20 <N>", "percent distance to the 20-day")
+    .option("--px-vs-sma50 <N>", "percent distance to the 50-day")
+    .option("--px-vs-sma200 <N>", "percent distance to the 200-day")
+    .option("--complete", "stamp the coverage phase, as a full run would")
+    .action(async (symbol: string | undefined, opts: SetOpts) => emit(await set(symbol, opts)));
+
   cmd.command("list")
     .description("The coverage recorded for a session")
     .option("--asset <SYM[,SYM...]>", "restrict to these symbols")
@@ -48,6 +65,46 @@ export function build(emit: Emit): Command {
     .action(async (opts: { asset?: string; date?: string }) => emit(await list(opts)));
 
   return cmd;
+}
+
+/**
+ * Hand-written coverage, so a test scenario can drive a designed price path
+ * without a network round trip or a raw INSERT against the schema.
+ *
+ * Deliberately not part of the pipeline: the daily job uses `run`. This exists
+ * because the alternative — documenting a 26-column INSERT in TESTING.md — rots
+ * the moment the table changes, and because real history cannot place a ladder
+ * milestone on a chosen day.
+ */
+function set(symbol: string | undefined, opts: SetOpts): Promise<unknown> {
+  return withDb((db) => {
+    const sym = required(symbol, "symbol").toUpperCase();
+    const asset = requireAssetBySymbol(db, sym);
+    const now = nowIso();
+    const date = opts.date;
+    ensureSession(db, date, now);
+
+    const close = finite(opts.close, "close");
+    const mark = opts.mark === undefined ? close : finite(opts.mark, "mark");
+    const optional = (v: string | undefined, name: string): number | null =>
+      v === undefined ? null : finite(v, name);
+
+    const values: CoverageValues = {
+      open: close, high: close, low: close, close, volume: 0,
+      mark_price: mark, index_price: mark, open_interest: null, daily_change_pct: null,
+      sma20: null, sma50: null, sma200: null, ema12: null, ema26: null,
+      atr14: optional(opts.atr, "atr"),
+      px_vs_sma20: optional(opts.pxVsSma20, "px-vs-sma20"),
+      px_vs_sma50: optional(opts.pxVsSma50, "px-vs-sma50"),
+      px_vs_sma200: optional(opts.pxVsSma200, "px-vs-sma200"),
+      cross_50_200: null, cross_50_200_age: null, cross_px_50: null, cross_px_50_age: null,
+      bars_available: 0, fetched_at: now,
+    };
+    upsertCoverage(db, date, [{ asset_id: asset.id, values }]);
+    if (opts.complete === true) stampPhase(db, date, "coverage", now);
+
+    return { session_date: date, symbol: sym, values, phase_complete: opts.complete === true };
+  });
 }
 
 function run(opts: RunOpts): Promise<unknown> {
@@ -63,14 +120,22 @@ function run(opts: RunOpts): Promise<unknown> {
     // (and any future replay tooling) point it at a stub instead of the real API.
     const client = createLighterClient(process.env["JANUS_LIGHTER_URL"]);
 
+    // A past session date is a backfill: the live snapshot describes today, not
+    // that day, so reconstruct both inputs from the bars instead of stamping
+    // today's prices under an old date.
+    const backfill = session.session_date < todayNY();
+
     const rows: { asset_id: number; values: ReturnType<typeof computeCoverage> }[] = [];
     const skipped: { symbol: string; reason: string }[] = [];
     for (const asset of targets) {
-      const [bars, snapshot] = await Promise.all([
+      const [allBars, liveSnapshot] = await Promise.all([
         client.fetchDailyBars(asset.market_id),
-        client.fetchSnapshot(asset.market_id),
+        backfill ? Promise.resolve(null) : client.fetchSnapshot(asset.market_id),
       ]);
       try {
+        const { bars, snapshot } = backfill
+          ? backfillInputs(allBars, session.session_date)
+          : { bars: allBars, snapshot: liveSnapshot! };
         rows.push({ asset_id: asset.id, values: computeCoverage(bars, snapshot, now) });
       } catch (e) {
         if (e instanceof JanusError && e.code === "INSUFFICIENT_HISTORY") {

@@ -195,6 +195,7 @@ export function deriveScore(
     ownPosition,
     context,
     catalyst,
+    metrics,
     params,
   );
 
@@ -314,6 +315,10 @@ function derivePlan(
   position: PositionState,
   context: ScoreContext,
   catalyst: number,
+  /** The score's own factors. Gates that need crowding/capitulation/divergence
+   * read them from here — those are `score record --factor` inputs and never
+   * appear on the screen row. */
+  metrics: Metrics,
   params: Record<string, number>,
 ): { plan: ScorePlan; sizingPlan?: ScorePlan["sizing_plan"] } {
   const side: "long" | "short" | null = direction > 0 ? "long" : direction < 0 ? "short" : null;
@@ -325,7 +330,7 @@ function derivePlan(
     direction,
     conviction,
     position,
-    context.screen!.metrics,
+    metrics,
     {
       params,
       sessionDate: context.session_date,
@@ -542,7 +547,7 @@ function derivePlan(
     const prev = previousScore.directive;
     const curr = plan.directive;
     if ((prev === "HOLD" || prev === "ADD") && (curr === "EXIT" || curr === "TRIM")) {
-      if (!actionableNewSignal(direction, catalyst, context, previousScore, params)) {
+      if (!actionableNewSignal(direction, catalyst, metrics, previousScore, params)) {
         // Downgrade EXIT to TRIM and TRIM to HOLD unless already at 1 unit.
         if (curr === "EXIT" && position.side !== null && position.units > 1) {
           plan = {

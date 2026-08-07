@@ -185,17 +185,22 @@ export function regimeTriggerState(
   return "none";
 }
 
+/**
+ * `metrics` is the score's own factor bag, not the screen's. `capitulation` and
+ * `divergence` are declared as `score record --factor`, so reading them off the
+ * screen row finds nothing and silently drops both short-circuits.
+ */
 export function actionableNewSignal(
   direction: number,
   catalyst: number,
-  context: ScoreContext,
+  metrics: Metrics,
   previousScore: ScoreResult,
   params: Record<string, number>,
 ): boolean {
   const catalystMin = params["actionable_catalyst_min"] ?? 1.5;
   const directionDelta = params["actionable_direction_delta"] ?? 1.5;
-  if (context.screen?.metrics["capitulation"] ?? false) return true;
-  if (context.screen?.metrics["divergence"] ?? false) return true;
+  if (Boolean(metrics["capitulation"])) return true;
+  if (Boolean(metrics["divergence"])) return true;
   if (Math.abs(catalyst) >= catalystMin) return true;
   if (Math.abs(direction - previousScore.direction) >= directionDelta) return true;
   return false;
@@ -222,6 +227,12 @@ export type GateContext = {
   proposedHeat: number;
 };
 
+/**
+ * `metrics` is the score's factor bag. `crowding` is a required `score record`
+ * factor and is never written to the screen row, so sourcing it from the screen
+ * pins it at the 50 default and makes `trendGate`'s late-trend branch — and the
+ * ladder's `tighten` rung behind it — permanently unreachable.
+ */
 export function runGates(
   direction: number,
   conviction: number,

@@ -203,7 +203,7 @@ test("coverage with no verb names the verbs instead of quoting undefined", async
     await assert.rejects(
       () => handle(undefined, []),
       (e: Error & { code?: string }) =>
-        e.code === "VALIDATION" && e.message === "coverage requires a verb; try: run, list",
+        e.code === "VALIDATION" && e.message === "coverage requires a verb; try: run, set, list",
     );
   });
 });

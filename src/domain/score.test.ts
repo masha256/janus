@@ -690,3 +690,72 @@ test("an escalated EXIT drops the TRIM's trim_plan", () => {
   assert.equal(plan.stop_plan?.event, "decay_exit");
   assert.equal(plan.trim_plan, undefined, "an exit-everything plan must not also trim to N-1");
 });
+
+// ---------------------------------------------------------------------------
+// Gate inputs come from the score's factors, not the screen row.
+//
+// `crowding`, `capitulation`, and `divergence` are all `score record --factor`
+// inputs. They were previously read off `context.screen.metrics`, where nothing
+// ever writes them — so crowding sat at its 50 default forever and the two
+// booleans were permanently false. These pin the source.
+// ---------------------------------------------------------------------------
+
+/** Extended trend: far enough above the 200-day for the late-trend check to matter. */
+const extended = () => coverage({ px_vs_sma20: 2, px_vs_sma50: 5, px_vs_sma200: 25 });
+
+test("late_trend fires off the score's crowding factor", () => {
+  const got = deriveScore(
+    m(2, 2, 1, 88, false, false),
+    ctxWithPosition({ side: null, units: 0 }, extended()),
+    DEFAULT_PARAMS,
+  );
+  assert.ok(got.direction > 0, `needs a long side to reach the long branch, got ${got.direction}`);
+  assert.equal(got.plan.trend_gate, "late_trend");
+});
+
+test("crowding below the extreme leaves an extended trend at pass", () => {
+  const got = deriveScore(
+    m(2, 2, 1, 50, false, false),
+    ctxWithPosition({ side: null, units: 0 }, extended()),
+    DEFAULT_PARAMS,
+  );
+  assert.equal(got.plan.trend_gate, "pass");
+});
+
+test("crowding on the screen row cannot drive late_trend", () => {
+  // The regression: screen metrics are not a gate input. An extreme crowding
+  // reading recorded there must be ignored, leaving the score's own 50.
+  const base = ctxWithPosition({ side: null, units: 0 }, extended());
+  const got = deriveScore(
+    m(2, 2, 1, 50, false, false),
+    { ...base, screen: { ...base.screen!, metrics: { score: 5, crowding: 99 } } },
+    DEFAULT_PARAMS,
+  );
+  assert.equal(got.plan.trend_gate, "pass");
+});
+
+test("the divergence factor makes a TRIM actionable instead of downgrading it", () => {
+  const held: import("./score.ts").ScoreResult = {
+    direction: 0.5, conviction: 6, directive: "HOLD",
+    plan: {
+      directive: "HOLD", reason: "thesis intact", size_tier: "full",
+      signal_gate: "pass", persistence_gate: "pass", trend_gate: "pass",
+      binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a",
+    },
+    results: {},
+  };
+  const ctx2 = ctxWithPosition(longPos(2), coverage(), held);
+
+  // Conviction collapses with no fresh evidence: the persistence rule holds the
+  // position rather than acting on a quiet day.
+  const quiet = deriveScore(m(0, 0, 0, 50, false, false), ctx2, DEFAULT_PARAMS);
+  assert.equal(quiet.plan.directive, "HOLD");
+  assert.equal(quiet.plan.persistence_rule, "maintain");
+
+  // Same collapse, but a divergence was observed — that is actionable, so the
+  // TRIM stands.
+  const diverging = deriveScore(m(0, 0, 0, 50, false, true), ctx2, DEFAULT_PARAMS);
+  assert.equal(diverging.plan.directive, "TRIM");
+  assert.equal(diverging.plan.persistence_rule, "fresh_signal");
+  assert.equal(diverging.plan.trim_plan?.target_units, 1);
+});

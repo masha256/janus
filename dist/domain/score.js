@@ -106,7 +106,7 @@ export function deriveScore(metrics, context, params) {
     // derivePlan already attaches sizing_plan to the branches that build one, and
     // it is the last word on the plan: re-attaching it here would resurrect a
     // sizing instruction on a plan the stop ladder escalated to EXIT.
-    const { plan } = derivePlan(direction, roundedConviction, ownPosition, context, catalyst, params);
+    const { plan } = derivePlan(direction, roundedConviction, ownPosition, context, catalyst, metrics, params);
     return {
         direction,
         conviction: roundedConviction,
@@ -206,12 +206,16 @@ function sentimentFromCrowding(P, trend, capitulation, divergence, fearPremium, 
  * - Persistence/flipflop gates resist flip-flopping unless there is an
  *   actionable new signal.
  */
-function derivePlan(direction, conviction, position, context, catalyst, params) {
+function derivePlan(direction, conviction, position, context, catalyst, 
+/** The score's own factors. Gates that need crowding/capitulation/divergence
+ * read them from here — those are `score record --factor` inputs and never
+ * appear on the screen row. */
+metrics, params) {
     const side = direction > 0 ? "long" : direction < 0 ? "short" : null;
     const absDirection = Math.abs(direction);
     const regimeSmile = requireNum(context.screen.results, "regime_smile", -2, 2);
     // Evaluate every gate so the plan can report why it was allowed or blocked.
-    const { signal, persistence, trend, binary, heat: initialHeat, flipflop } = runGates(direction, conviction, position, context.screen.metrics, {
+    const { signal, persistence, trend, binary, heat: initialHeat, flipflop } = runGates(direction, conviction, position, metrics, {
         params,
         sessionDate: context.session_date,
         coverage: context.asset.coverage,
@@ -428,7 +432,7 @@ function derivePlan(direction, conviction, position, context, catalyst, params) 
         const prev = previousScore.directive;
         const curr = plan.directive;
         if ((prev === "HOLD" || prev === "ADD") && (curr === "EXIT" || curr === "TRIM")) {
-            if (!actionableNewSignal(direction, catalyst, context, previousScore, params)) {
+            if (!actionableNewSignal(direction, catalyst, metrics, previousScore, params)) {
                 // Downgrade EXIT to TRIM and TRIM to HOLD unless already at 1 unit.
                 if (curr === "EXIT" && position.side !== null && position.units > 1) {
                     plan = {

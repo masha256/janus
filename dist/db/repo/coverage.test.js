@@ -5,7 +5,7 @@ import { migrate } from "../migrate.js";
 import { ensureSession } from "./session.js";
 import { upsertMarkets } from "./market.js";
 import { addAsset, requireAssetBySymbol } from "./asset.js";
-import { upsertCoverage, listCoverage } from "./coverage.js";
+import { upsertCoverage, listCoverage, latestCoverage } from "./coverage.js";
 const NOW = "2026-07-31T12:00:00Z";
 const DATE = "2026-07-31";
 const values = (close) => ({
@@ -57,5 +57,25 @@ test("a failed row rolls the whole batch back", () => {
         { asset_id: 9999, values: values(100) }, // no such asset — FK violation
     ]));
     assert.equal(listCoverage(db, DATE).length, 0, "nothing may survive a failed batch");
+    db.close();
+});
+test("latestCoverage bounded by a date never returns a later row", () => {
+    const db = fresh();
+    const btc = requireAssetBySymbol(db, "BTC").id;
+    for (const [date, close] of [["2026-07-29", 100], ["2026-07-30", 200], ["2026-07-31", 300]]) {
+        ensureSession(db, date, NOW);
+        upsertCoverage(db, date, [{ asset_id: btc, values: values(close) }]);
+    }
+    // Unbounded: the newest row, whatever its date.
+    assert.equal(latestCoverage(db, btc).session_date, "2026-07-31");
+    // Bounded: the row for that day when one exists...
+    assert.equal(latestCoverage(db, btc, "2026-07-30").values.close, 200);
+    // ...and the most recent earlier row when it does not. Never a later one —
+    // that would mark a past date with data that did not exist yet.
+    assert.equal(latestCoverage(db, btc, "2026-07-30").session_date, "2026-07-30");
+    ensureSession(db, "2026-08-01", NOW);
+    assert.equal(latestCoverage(db, btc, "2026-08-01").session_date, "2026-07-31");
+    // Bounded before any coverage exists: nothing, rather than the newest row.
+    assert.equal(latestCoverage(db, btc, "2026-07-28"), null);
     db.close();
 });

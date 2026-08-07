@@ -164,6 +164,6 @@ test("coverage list --asset rejects an unknown symbol", async () => {
 });
 test("coverage with no verb names the verbs instead of quoting undefined", async () => {
     await withHarness(async () => {
-        await assert.rejects(() => handle(undefined, []), (e) => e.code === "VALIDATION" && e.message === "coverage requires a verb; try: run, list");
+        await assert.rejects(() => handle(undefined, []), (e) => e.code === "VALIDATION" && e.message === "coverage requires a verb; try: run, set, list");
     });
 });

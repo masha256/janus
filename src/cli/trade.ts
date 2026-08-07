@@ -2,7 +2,7 @@ import { Command } from "commander";
 import { requireAssetBySymbol, requireSymbols } from "../db/repo/asset.ts";
 import { openTrade, addUnit, setStop, exitUnits, partialExitUnit, getTrade, listTrades } from "../db/repo/trade.ts";
 import { getSession } from "../db/repo/session.ts";
-import { latestCoverage, getCoverage } from "../db/repo/coverage.ts";
+import { latestCoverage } from "../db/repo/coverage.ts";
 import { todayNY, nowIso } from "../domain/session.ts";
 import { csv, finite, num, oneOf, positive, readText, required, unknownVerb } from "./args.ts";
 import { type Emit, handler, withDb } from "./command.ts";
@@ -117,7 +117,7 @@ function open(symbol: string | undefined, opts: OpenOpts): Promise<unknown> {
     const session = getSession(db, on);
     const direction = oneOf(opts.direction, "direction", ["long", "short"] as const);
     const params = resolveParams(getClusterParams(db, asset.cluster_id), getGlobalParams(db));
-    const coverage = getCoverage(db, on, asset.id) ?? latestCoverage(db, asset.id)?.values;
+    const coverage = latestCoverage(db, asset.id, on)?.values;
 
     const resolved = resolveEntryInputs({
       direction,
@@ -159,7 +159,7 @@ function add(raw: string | undefined, opts: UnitOpts): Promise<unknown> {
     };
     const asset = requireAssetBySymbol(db, trade.trade.symbol);
     const params = resolveParams(getClusterParams(db, asset.cluster_id), getGlobalParams(db));
-    const coverage = getCoverage(db, opts.date ?? todayNY(), asset.id) ?? latestCoverage(db, asset.id)?.values;
+    const coverage = latestCoverage(db, asset.id, opts.date ?? todayNY())?.values;
 
     const resolved = resolveEntryInputs({
       direction: trade.trade.direction,
@@ -397,8 +397,10 @@ function show(raw: string | undefined, date?: string): Promise<unknown> {
       summary: import("../domain/trade-math.ts").TradeSummary;
     };
 
-    const latest = latestCoverage(db, base.trade.asset_id);
+    // As-of, not newest: `--date` asks what this trade looked like on that day,
+    // so marking it against a later row would answer a different question.
     const today = date ?? todayNY();
+    const latest = latestCoverage(db, base.trade.asset_id, today);
     const stale = latest === null || latest.session_date < today;
     const warnings: string[] = [];
     if (latest === null) {

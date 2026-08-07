@@ -96,6 +96,17 @@ complete the phase, so normally you want the full run.
 Assets with too little history are reported in `skipped` and do not block the
 phase.
 
+A `--date` in the past backfills: the bar window is cut at that date and the
+close stands in for the mark, because the live snapshot describes today, not
+that day. `open_interest` is `null` on a backfilled row. A date older than the
+bar window reports `INSUFFICIENT_HISTORY` for the asset rather than quietly
+using a later bar.
+
+`janus coverage set` also exists. **Do not use it in the daily pipeline** — it
+writes a coverage row from hand-supplied numbers, and it is there so test
+scenarios can drive a designed price path. Real sessions get their data from
+`coverage run`.
+
 ## Phase 4 — screen record
 
 One read per covered asset. Required metrics: `score` (1..10) and `confidence`

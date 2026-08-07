@@ -44,12 +44,21 @@ export function listCoverage(db, date, symbols) {
        ORDER BY a.symbol`)
         .all(date, ...(symbols ?? []));
 }
-/** The most recent coverage row for an asset, regardless of session date. */
-export function latestCoverage(db, assetId) {
+/**
+ * The most recent coverage row for an asset.
+ *
+ * `onOrBefore` bounds the search to that session date, which is what any caller
+ * reasoning about a past date wants: marking a trade against a row from *after*
+ * the date in question prices it with information that did not exist yet. Omit
+ * it only when the question really is "the newest data we hold" — trailing a
+ * stop right now, say.
+ */
+export function latestCoverage(db, assetId, onOrBefore) {
+    const bound = onOrBefore === undefined ? "" : "AND session_date <= ?";
     const row = db
         .prepare(`SELECT session_date, ${COLUMNS.join(", ")} FROM coverage
-       WHERE asset_id = ? ORDER BY session_date DESC LIMIT 1`)
-        .get(assetId);
+       WHERE asset_id = ? ${bound} ORDER BY session_date DESC LIMIT 1`)
+        .get(assetId, ...(onOrBefore === undefined ? [] : [onOrBefore]));
     if (row === undefined)
         return null;
     const { session_date, ...values } = row;

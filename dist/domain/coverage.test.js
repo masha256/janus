@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeCoverage } from "./coverage.js";
+import { backfillInputs, computeCoverage } from "./coverage.js";
+import { JanusError } from "../output.js";
 const FETCHED = "2026-07-31T12:00:00Z";
 const snapshot = {
     mark_price: 101, index_price: 100.5, last_trade_price: 101,
@@ -50,4 +51,39 @@ test("percentage distance is signed and expressed in percent", () => {
 });
 test("an empty bar list is rejected rather than written as a hole", () => {
     assert.throws(() => computeCoverage([], snapshot, FETCHED), (e) => e.code === "INSUFFICIENT_HISTORY");
+});
+// A past session date must not inherit today's prices. `run --date` used to
+// stamp the newest bar and a live snapshot under whatever date it was given.
+const bar = (date, close) => ({
+    t: Date.parse(`${date}T00:00:00Z`), o: close, h: close + 1, l: close - 1, c: close, v: 10, i: 0,
+});
+test("backfillInputs cuts the bar window at the session date", () => {
+    const bars = [
+        bar("2026-03-01", 100), bar("2026-03-02", 110), bar("2026-03-03", 120),
+    ];
+    const got = backfillInputs(bars, "2026-03-02");
+    assert.equal(got.bars.length, 2, "the 03-03 bar is in the future for this session");
+    assert.equal(got.bars.at(-1).c, 110);
+});
+test("backfillInputs reconstructs the snapshot from the bar, not from today", () => {
+    const bars = [bar("2026-03-01", 100), bar("2026-03-02", 110)];
+    const { snapshot } = backfillInputs(bars, "2026-03-02");
+    assert.equal(snapshot.mark_price, 110, "the close stands in as the mark");
+    assert.equal(snapshot.index_price, 110);
+    // (110 - 100) / 100 = +10%
+    assert.ok(Math.abs(snapshot.daily_price_change - 10) < 1e-9, `got ${snapshot.daily_price_change}`);
+    // No bar equivalent, so it stays absent rather than borrowing today's.
+    assert.equal(snapshot.open_interest, null);
+});
+test("backfillInputs refuses a date earlier than every bar", () => {
+    assert.throws(() => backfillInputs([bar("2026-03-02", 110)], "2026-03-01"), (e) => e instanceof JanusError && e.code === "INSUFFICIENT_HISTORY", "falling back to a later bar would invent the history it cannot find");
+});
+test("a backfilled window still computes indicators off the truncated bars", () => {
+    const bars = Array.from({ length: 30 }, (_, i) => bar(`2026-03-${String(i + 1).padStart(2, "0")}`, 100 + i));
+    const cut = backfillInputs(bars, "2026-03-20");
+    const values = computeCoverage(cut.bars, cut.snapshot, "2026-03-20T00:00:00Z");
+    assert.equal(values.close, 119, "the 03-20 close, not the 03-30 one");
+    assert.equal(values.mark_price, 119);
+    assert.equal(values.bars_available, 20);
+    assert.ok(values.sma20 !== null, "20 bars is exactly enough for the 20-day");
 });

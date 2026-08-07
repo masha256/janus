@@ -40,3 +40,45 @@ export function computeCoverage(bars, snapshot, fetchedAt) {
         fetched_at: fetchedAt,
     };
 }
+/** A bar's UTC calendar day. Lighter's daily candles are UTC-aligned. */
+const barDate = (b) => new Date(b.t).toISOString().slice(0, 10);
+/**
+ * Rebuild the inputs `computeCoverage` needs for a *past* session date.
+ *
+ * A plain coverage run always reads the newest bar and a live snapshot, so
+ * pointing it at an old date stamps today's prices under that date and quietly
+ * invents history. Bars carry their own timestamps, though, and a run already
+ * pulls ~400 days of them — so everything bar-derived (OHLC, the SMAs, ATR, the
+ * MA distances and crosses) can be reconstructed exactly.
+ *
+ * The snapshot cannot: it is point-in-time with no history. What survives is
+ * what the bar itself implies — the close stands in as the mark, since for a
+ * daily-bar swing system that *is* the day's reference price, and it keeps the
+ * stop ladder (which needs a mark to compute R) working on a backfilled day.
+ * `open_interest` has no bar equivalent and stays null.
+ *
+ * Throws INSUFFICIENT_HISTORY when no bar is at or before the date, rather than
+ * silently falling back to a later one.
+ */
+export function backfillInputs(bars, sessionDate) {
+    const upTo = bars.filter((b) => barDate(b) <= sessionDate);
+    const last = upTo.at(-1);
+    if (last === undefined) {
+        throw new JanusError("INSUFFICIENT_HISTORY", `no daily bar at or before ${sessionDate}; the window fetched starts later`);
+    }
+    const prior = upTo.at(-2);
+    return {
+        bars: upTo,
+        snapshot: {
+            mark_price: last.c,
+            index_price: last.c,
+            last_trade_price: last.c,
+            daily_price_low: last.l,
+            daily_price_high: last.h,
+            daily_price_change: prior === undefined || prior.c === 0
+                ? null
+                : ((last.c - prior.c) / prior.c) * 100,
+            open_interest: null,
+        },
+    };
+}

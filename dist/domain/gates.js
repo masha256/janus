@@ -141,12 +141,17 @@ export function regimeTriggerState(regimeSmile, params) {
         return "extreme_bear";
     return "none";
 }
-export function actionableNewSignal(direction, catalyst, context, previousScore, params) {
+/**
+ * `metrics` is the score's own factor bag, not the screen's. `capitulation` and
+ * `divergence` are declared as `score record --factor`, so reading them off the
+ * screen row finds nothing and silently drops both short-circuits.
+ */
+export function actionableNewSignal(direction, catalyst, metrics, previousScore, params) {
     const catalystMin = params["actionable_catalyst_min"] ?? 1.5;
     const directionDelta = params["actionable_direction_delta"] ?? 1.5;
-    if (context.screen?.metrics["capitulation"] ?? false)
+    if (Boolean(metrics["capitulation"]))
         return true;
-    if (context.screen?.metrics["divergence"] ?? false)
+    if (Boolean(metrics["divergence"]))
         return true;
     if (Math.abs(catalyst) >= catalystMin)
         return true;
@@ -162,6 +167,12 @@ function daysBetween(a, b) {
         return null;
     return Math.round((ad - bd) / 86_400_000);
 }
+/**
+ * `metrics` is the score's factor bag. `crowding` is a required `score record`
+ * factor and is never written to the screen row, so sourcing it from the screen
+ * pins it at the 50 default and makes `trendGate`'s late-trend branch — and the
+ * ladder's `tighten` rung behind it — permanently unreachable.
+ */
 export function runGates(direction, conviction, position, metrics, ctx) {
     const side = direction > 0 ? "long" : direction < 0 ? "short" : null;
     const crowding = num(metrics, "crowding", 50);
