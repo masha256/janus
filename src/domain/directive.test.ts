@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { formatPosition, planResults, scorePlanFromResults } from "./directive.ts";
-import type { PositionState, ScorePlan } from "./directive.ts";
+import type { PositionState } from "./directive.ts";
 
 const flat: PositionState = { side: null, units: 0 };
 const long = (units: number): PositionState => ({ side: "long", units });
@@ -43,7 +43,7 @@ test("a stop_plan without event or trim_fraction omits both keys", () => {
     stop_plan: { action: "hold" as const, affected_units: "all" as const, rationale: "no change" },
   };
   const results: Record<string, unknown> = { ...planResults(plan), plan_directive: plan.directive };
-  assert.equal(results["stop_event"], undefined);
-  assert.equal(results["stop_trim_fraction"], undefined);
+  assert.ok(!("stop_event" in results), "stop_event must be absent, not undefined");
+  assert.ok(!("stop_trim_fraction" in results), "stop_trim_fraction must be absent, not undefined");
   assert.equal(scorePlanFromResults(results)?.stop_plan?.trim_fraction, undefined);
 });
