@@ -6,7 +6,8 @@ import { ensureSession } from "./session.ts";
 import { upsertMarkets } from "./market.ts";
 import { addAsset, requireAssetBySymbol } from "./asset.ts";
 import { recordScreen } from "./screen.ts";
-import { scoreQueue, positionOf, openPositions, recordScore, listScores } from "./score.ts";
+import { scoreQueue, positionOf, openPositions, recordScore, listScores, getScore } from "./score.ts";
+import { planResults } from "../../domain/directive.ts";
 
 const NOW = "2026-07-31T12:00:00Z";
 const DATE = "2026-07-31";
@@ -144,6 +145,37 @@ test("re-scoring replaces the previous metrics and results rather than merging t
   assert.deepEqual(
     Object.keys(rows[0]!.results), ["w_catalyst"], "and neither must stale results",
   );
+  db.close();
+});
+
+test("stop_plan.new_stop survives a record/read round-trip", () => {
+  const db = fresh();
+  const assetId = requireAssetBySymbol(db, "BTC").id;
+  const plan = {
+    directive: "HOLD" as const,
+    reason: "trailing",
+    size_tier: "full" as const,
+    signal_gate: "pass" as const,
+    persistence_gate: "pass" as const,
+    trend_gate: "pass" as const,
+    binary_gate: "pass" as const,
+    heat_gate: "pass" as const,
+    flipflop_gate: "n/a" as const,
+    stop_plan: {
+      action: "trail" as const,
+      affected_units: "all" as const,
+      new_stop: 61240.5,
+      rationale: "runner phase: trail stop behind price",
+    },
+  };
+  recordScore(db, DATE, assetId, {
+    direction: 1, conviction: 7, directive: "HOLD",
+    queue_reason: "position", position_state: "long",
+    rationale: "trailing", metrics: {}, results: { ...planResults(plan), plan_directive: plan.directive },
+  }, NOW);
+
+  const back = getScore(db, DATE, assetId);
+  assert.equal(back?.plan?.stop_plan?.new_stop, 61240.5);
   db.close();
 });
 

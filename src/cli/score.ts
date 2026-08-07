@@ -102,7 +102,12 @@ function record(symbol: string | undefined, opts: RecordOpts): Promise<unknown> 
     // Everything the session already concluded, top down, plus the whole book.
     // The previous score is loaded so the persistence rule can resist flip-flopping.
     const previous = previousScore(db, asset.id, session.session_date);
-    const recent = recentScores(db, asset.id, session.session_date, params["signal_persist_days"] ?? 2);
+    // The window must cover the deepest gate that reads it, not just persistence.
+    const recentDays = Math.max(
+      params["signal_persist_days"] ?? 2,
+      params["decay_persist_days"] ?? 2,
+    );
+    const recent = recentScores(db, asset.id, session.session_date, recentDays);
     const screen = getScreen(db, session.session_date, asset.id);
     const context = {
       macro: getMacro(db, session.session_date),

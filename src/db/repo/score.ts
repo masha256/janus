@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { OpenPosition, PositionState } from "../../domain/directive.ts";
+import { type OpenPosition, type PositionState, scorePlanFromResults } from "../../domain/directive.ts";
 import { type Metrics, metricsByEntity, replaceMetrics } from "./metric.ts";
 
 export type QueueEntry = {
@@ -132,7 +132,7 @@ export function recentScores(
     const metrics = metricsByEntity(db, "score_metric", "asset_id", row.session_date);
     const results = metricsByEntity(db, "score_result", "asset_id", row.session_date);
     const r = results.get(row.asset_id) ?? {};
-    const plan = scorePlanFromResultsStatic(r);
+    const plan = scorePlanFromResults(r);
     return {
       direction: row.direction,
       conviction: row.conviction,
@@ -192,7 +192,7 @@ export function previousScore(
   const metrics = metricsByEntity(db, "score_metric", "asset_id", row.session_date);
   const results = metricsByEntity(db, "score_result", "asset_id", row.session_date);
   const r = results.get(row.asset_id) ?? {};
-  const plan = scorePlanFromResultsStatic(r);
+  const plan = scorePlanFromResults(r);
   return {
     direction: row.direction,
     conviction: row.conviction,
@@ -212,62 +212,6 @@ export function previousScore(
     };
   }
 
-function scorePlanFromResultsStatic(
-  results: Record<string, unknown>,
-): import("../../domain/directive.ts").ScorePlan | undefined {
-  const directive = results["plan_directive"] as import("../../domain/directive.ts").Directive | undefined;
-  if (directive === undefined) return undefined;
-  const size_tier = results["size_tier"] as import("../../domain/directive.ts").ScorePlan["size_tier"] | undefined;
-  if (size_tier === undefined) return undefined;
-  const plan: import("../../domain/directive.ts").ScorePlan = {
-    directive,
-    reason: String(results["directive_reason"] ?? ""),
-    size_tier,
-    signal_gate: (results["signal_gate"] as import("../../domain/directive.ts").ScorePlan["signal_gate"]) ?? "fail",
-    persistence_gate: (results["persistence_gate"] as import("../../domain/directive.ts").ScorePlan["persistence_gate"]) ?? "fail",
-    trend_gate: (results["trend_gate"] as import("../../domain/directive.ts").ScorePlan["trend_gate"]) ?? "fail",
-    binary_gate: (results["binary_gate"] as import("../../domain/directive.ts").ScorePlan["binary_gate"]) ?? "pass",
-    heat_gate: (results["heat_gate"] as import("../../domain/directive.ts").ScorePlan["heat_gate"]) ?? "pass",
-    flipflop_gate: (results["flipflop_gate"] as import("../../domain/directive.ts").ScorePlan["flipflop_gate"]) ?? "n/a",
-    regime_trigger: (results["regime_trigger"] as import("../../domain/directive.ts").ScorePlan["regime_trigger"]) ?? "none",
-    persistence_rule: (results["persistence_rule"] as import("../../domain/directive.ts").ScorePlan["persistence_rule"]) ?? undefined,
-  };
-  const entrySide = results["entry_side"] as "long" | "short" | undefined;
-  if (entrySide !== undefined) {
-    plan.entry_plan = {
-      side: entrySide,
-      max_units: Number(results["entry_max_units"] ?? 0),
-    };
-  }
-  const stopAction = results["stop_action"] as NonNullable<import("../../domain/directive.ts").ScorePlan["stop_plan"]>["action"] | undefined;
-  if (stopAction !== undefined) {
-    plan.stop_plan = {
-      action: stopAction,
-      affected_units: String(results["stop_affected_units"] ?? "all") as NonNullable<import("../../domain/directive.ts").ScorePlan["stop_plan"]>["affected_units"],
-      rationale: String(results["stop_rationale"] ?? ""),
-    };
-  }
-  const trimTarget = results["trim_target_units"] as number | undefined;
-  if (trimTarget !== undefined) {
-    plan.trim_plan = {
-      target_units: Number(trimTarget),
-      which: String(results["trim_which"] ?? "oldest") as NonNullable<import("../../domain/directive.ts").ScorePlan["trim_plan"]>["which"],
-    };
-  }
-  const sizingNotional = results["sizing_suggested_notional"] as number | undefined;
-  if (sizingNotional !== undefined) {
-    plan.sizing_plan = {
-      suggested_notional: Number(sizingNotional),
-      risk_dollars: Number(results["sizing_risk_dollars"] ?? 0),
-      stop_distance_pct: Number(results["sizing_stop_distance_pct"] ?? 0),
-      stop_price: Number(results["sizing_stop_price"] ?? 0),
-      heat_after_trade: Number(results["sizing_heat_after_trade"] ?? 0),
-      per_asset_cap_dollars: Number(results["sizing_per_asset_cap_dollars"] ?? 0),
-    };
-  }
-  return plan;
-}
-
 export function getScore(
   db: DatabaseSync,
   date: string,
@@ -284,7 +228,7 @@ export function getScore(
   const metrics = metricsByEntity(db, "score_metric", "asset_id", date);
   const results = metricsByEntity(db, "score_result", "asset_id", date);
   const r = results.get(row.asset_id) ?? {};
-  const plan = scorePlanFromResultsStatic(r);
+  const plan = scorePlanFromResults(r);
   return { ...row, metrics: metrics.get(row.asset_id) ?? {}, results: r, plan };
 }
 
