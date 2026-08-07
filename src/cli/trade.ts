@@ -11,7 +11,7 @@ import { getScore } from "../db/repo/score.ts";
 import { getGlobalParams, getClusterParams } from "../db/repo/cluster.ts";
 import { resolveParams } from "../domain/params.ts";
 import { sizeFromRiskAndStop, stopDistancePct, stopFromAtr } from "../domain/sizing.ts";
-import { isStopWidening } from "../domain/ladder.ts";
+import { isStopWidening, proposeTrailingStop } from "../domain/ladder.ts";
 import type { UnitRow } from "../domain/trade-math.ts";
 
 const VERBS = "open, add-unit, set-stop, exit, list, show";
@@ -354,21 +354,38 @@ function resolveAutoStop(
   seq?: number,
 ): number {
   const trade = getTrade(db, tradeId) as {
-    trade: { asset_id: number; direction: "long" | "short" };
+    trade: { asset_id: number; direction: "long" | "short"; symbol: string };
+    units: UnitRow[];
   };
   const coverage = latestCoverage(db, trade.trade.asset_id)?.values;
   if (coverage === undefined || coverage.mark_price === null || coverage.atr14 === null) {
     throw new JanusError("VALIDATION", "no coverage available to trail stop");
   }
-  const params = resolveParams(
-    // cluster resolution skipped for brevity; asset cluster looked up below
-    {},
-    getGlobalParams(db),
+  const asset = requireAssetBySymbol(db, trade.trade.symbol);
+  const params = resolveParams(getClusterParams(db, asset.cluster_id), getGlobalParams(db));
+  const direction = trade.trade.direction;
+
+  const affected = trade.units.filter(
+    (u) => u.status === "open" && (seq === undefined || u.seq === seq),
   );
-  const mark = coverage.mark_price;
-  const atr = coverage.atr14;
-  const multiple = params["trailing_atr_multiple"] ?? 2;
-  return trade.trade.direction === "long" ? mark - multiple * atr : mark + multiple * atr;
+  if (affected.length === 0) {
+    throw new JanusError("VALIDATION", `no open unit to trail on trade ${tradeId}`);
+  }
+
+  // One stop lands on every affected unit, so ratchet against the tightest of
+  // them. Without this the raw ATR trail moves backwards on a pullback and the
+  // widening guard below rejects the very stop this function just proposed.
+  const floor = affected.reduce(
+    (a, u) => (direction === "long" ? Math.max(a, u.stop) : Math.min(a, u.stop)),
+    direction === "long" ? -Infinity : Infinity,
+  );
+  return proposeTrailingStop(
+    direction,
+    coverage.mark_price,
+    coverage.atr14,
+    floor,
+    params["trailing_atr_multiple"] ?? 2,
+  );
 }
 
 function show(raw: string | undefined, date?: string): Promise<unknown> {

@@ -505,3 +505,37 @@ test("--size auto and --stop auto use the score plan sizing", async () => {
     assert.ok(firstUnit!.stop > opened.units[0]!.stop, "trailing stop moved up for a long");
   });
 });
+
+test("set-stop --auto holds on a pullback instead of rejecting itself", async () => {
+  await withHarness(async (file) => {
+    const opened = (await handle("open", OPEN_ARGS)) as { trade: { id: number } };
+    const id = String(opened.trade.id);
+    // Trail the stop up manually first, so the position is in profit-locked state.
+    await handle("set-stop", [id, "--stop", "120"]);
+
+    // Price pulls back to 122 with ATR 8: the raw trail is 122 - 2*8 = 106,
+    // which would widen the 120 stop. --auto must hold, not throw.
+    withDb(file, (db) => {
+      const assetId = requireAssetBySymbol(db, "BTC").id;
+      ensureSession(db, DATE, NOW); // coverage.session_date is a foreign key
+      upsertCoverage(db, DATE, [{
+        asset_id: assetId,
+        values: {
+          open: 130, high: 132, low: 120, close: 122, volume: 1000,
+          mark_price: 122, index_price: 122, open_interest: 100, daily_change_pct: -6,
+          sma20: 118, sma50: 112, sma200: 105, ema12: 121, ema26: 118, atr14: 8,
+          px_vs_sma20: 3, px_vs_sma50: 9, px_vs_sma200: 16,
+          cross_50_200: "golden", cross_50_200_age: 20, cross_px_50: "above", cross_px_50_age: 20,
+          bars_available: 250, fetched_at: NOW,
+        },
+      }]);
+    });
+
+    const held = (await handle("set-stop", [id, "--stop", "auto"])) as {
+      auto: boolean;
+      units: { seq: number; stop: number }[];
+    };
+    assert.equal(held.auto, true);
+    assert.equal(held.units[0]!.stop, 120, "the stop holds rather than widening to 106");
+  });
+});
