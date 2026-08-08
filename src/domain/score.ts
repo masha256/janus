@@ -385,6 +385,22 @@ function derivePlan(
   const isWorking = position.side !== null &&
     ((position.side === "long" && direction > 0) || (position.side === "short" && direction < 0));
 
+  /**
+   * The gates standing in the way, named for the reason line. Reads the
+   * recomputed `heat` rather than the `initialHeat` that set `sizeTier`, so the
+   * reason never contradicts the `heat_gate` value stored beside it.
+   */
+  const blockingGates = (): string[] => {
+    const names: string[] = [];
+    if (signal === "fail") names.push("signal");
+    if (persistence === "fail") names.push("persistence");
+    if (trend === "fail") names.push("trend");
+    if (binary === "blocked") names.push("binary");
+    if (heat === "blocked") names.push("heat");
+    if (flipflop === "blocked") names.push("flipflop");
+    return names;
+  };
+
   let plan: ScorePlan;
   let sizingPlan: ScorePlan["sizing_plan"] | undefined;
 
@@ -416,13 +432,7 @@ function derivePlan(
         regime_trigger: regimeTrigger,
       };
     } else if (sizeTier === "blocked") {
-      const gateReasons: string[] = [];
-      if (signal === "fail") gateReasons.push("signal");
-      if (persistence === "fail") gateReasons.push("persistence");
-      if (trend === "fail") gateReasons.push("trend");
-      if (binary === "blocked") gateReasons.push("binary");
-      if (heat === "blocked") gateReasons.push("heat");
-      if (flipflop === "blocked") gateReasons.push("flipflop");
+      const gateReasons = blockingGates();
       plan = {
         directive: "STAND_ASIDE",
         reason: gateReasons.length > 0
@@ -523,10 +533,20 @@ function derivePlan(
         sizing_plan: sizingPlan,
       };
     } else {
+      // An aligned, working position that lands here instead of ADD was held
+      // back by something — a blocked gate or the unit cap. Say which: "thesis
+      // intact" alone reads as all-clear, and the operator cannot tell a
+      // healthy hold from one silently capped by heat.
+      const gateReasons = sizeTier === "blocked" ? blockingGates() : [];
+      const held = gateReasons.length > 0
+        ? `; add blocked by ${gateReasons.join(", ")} gate(s)`
+        : sizeTier === "blocked" ? "; add blocked"
+        : posUnits >= maxUnits ? `; at max ${maxUnits} units`
+        : "";
       plan = {
         directive: "HOLD",
         reason: aligned
-          ? "thesis intact"
+          ? `thesis intact${held}`
           : `mild disagreement ${direction.toFixed(2)} but conviction ${conviction} keeps thesis on review`,
         size_tier: sizeTier,
         signal_gate: signal,

@@ -428,6 +428,11 @@ A `HOLD` on an open trade that still carries a `stop_plan` (trail, move to
 breakeven, tighten) belongs in this table too — the stop move is the action.
 Its Action cell is the `stop_plan` clause alone.
 
+If no asset qualifies, keep the header and write the single line
+`No actions today.` in place of the table. Never drop the section: silence and
+an omitted section look identical to the operator, and only one of them means
+janus actually ran the ladder.
+
 ### Table 3 — other
 
 Every remaining scored asset: no open trade, no action. In practice these are
@@ -439,12 +444,10 @@ descending.
 
 - **Asset**, **Cluster**, **Direction**, **Conviction**, **Rationale** — as above.
 - **Directive** — verbatim, normally `STAND_ASIDE`.
-- **Why not** — the first non-passing gate from the stored `plan`, in the order
-  `signal_gate`, `persistence_gate`, `trend_gate`, `binary_gate`, `heat_gate`,
-  `flipflop_gate`, printed `<gate>: <value>` verbatim. Values differ by gate:
-  `fail` for signal/persistence, `fail`/`starter`/`late_trend` for trend,
-  `blocked` for binary/heat/flipflop — e.g. `trend_gate: late_trend` or
-  `heat_gate: blocked`. Use `plan.reason` when every gate passed.
+- **Why not** — the stored `directive_reason`, verbatim, one line. It already
+  names the blocking gates where gates are the cause, e.g. `long entry blocked
+  by trend, heat gate(s)`, and states the reason directly otherwise, e.g. `no
+  directional edge`. Do not re-derive it from the individual gate fields.
 
 ### Rules
 
@@ -453,7 +456,8 @@ descending.
 - Never put a number in the report that did not come out of a janus envelope.
   A missing value is `—`, not an estimate.
 - Omit a section header entirely if that table has no rows. The regime section
-  is never omitted.
+  and Table 2 are never omitted: a quiet day is a result, and a missing header
+  reads as a forgotten step rather than "nothing to do".
 
 ### Commit the report
 

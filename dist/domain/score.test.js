@@ -263,7 +263,23 @@ test("holding long + low conviction + only one unit -> HOLD", () => {
 test("holding long + still aligned + working -> HOLD (most days)", () => {
     const got = deriveScore(m(1, 1, 1, 50, false, false), ctxWithPosition(longPos(1)), DEFAULT_PARAMS);
     assert.equal(got.directive, "HOLD");
-    assert.equal(got.plan.reason, "thesis intact");
+    // Not a plain all-clear: the add was held back, and the reason says by what.
+    assert.equal(got.plan.reason, "thesis intact; add blocked by signal, persistence gate(s)");
+});
+test("holding long at the unit cap -> HOLD names the cap, not a blocked gate", () => {
+    const prev = {
+        direction: 1.8, conviction: 9, directive: "HOLD",
+        plan: {
+            directive: "HOLD", reason: "thesis intact", size_tier: "full",
+            signal_gate: "pass", persistence_gate: "pass", trend_gate: "pass",
+            binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a",
+        },
+        results: {},
+    };
+    const got = deriveScore(m(2, 2, 2, 50, false, false), ctxWithPosition(longPos(3), coverage(), prev), DEFAULT_PARAMS);
+    assert.equal(got.directive, "HOLD");
+    assert.equal(got.plan.size_tier, "full");
+    assert.equal(got.plan.reason, "thesis intact; at max 3 units");
 });
 test("holding long + regime extreme bullish forces EXIT", () => {
     const screen = {
