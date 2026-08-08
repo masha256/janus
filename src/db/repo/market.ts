@@ -52,6 +52,11 @@ export function listMarkets(
   return db.prepare(sql).all(...args) as MarketRow[];
 }
 
+export function nextMarketId(db: DatabaseSync): number {
+  const row = db.prepare("SELECT COALESCE(MAX(market_id), 0) + 1 AS id FROM market").get() as { id: number };
+  return row.id;
+}
+
 export function getMarketBySymbol(db: DatabaseSync, symbol: string): MarketRow | undefined {
   return db.prepare("SELECT * FROM market WHERE symbol = ?").get(symbol) as MarketRow | undefined;
 }

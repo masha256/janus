@@ -34,6 +34,10 @@ export function listMarkets(db, opts) {
     const sql = `SELECT * FROM market ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY symbol`;
     return db.prepare(sql).all(...args);
 }
+export function nextMarketId(db) {
+    const row = db.prepare("SELECT COALESCE(MAX(market_id), 0) + 1 AS id FROM market").get();
+    return row.id;
+}
 export function getMarketBySymbol(db, symbol) {
     return db.prepare("SELECT * FROM market WHERE symbol = ?").get(symbol);
 }

@@ -284,10 +284,9 @@ janus init
 
 # Seed one market directly. `asset add` requires a market whose listed_at is old
 # enough for 200 daily bars, but it does not hit the network to check — so a
-# single row is all the catalog we need.
-sqlite3 $JANUS_DB "INSERT INTO market
-  (market_id,symbol,market_type,status,price_decimals,size_decimals,listed_at,synced_at)
-  VALUES (1,'SIM','perp','active',2,4,'2024-01-01T00:00:00Z','2026-03-01T00:00:00Z');"
+# single row is all the catalog we need. Defaults cover the rest: market_id 1,
+# perp, active, listed 2020-01-01.
+janus market set SIM --price-decimals 2 --size-decimals 4
 
 janus cluster add sim --name "Simulated"
 janus asset add SIM --class crypto --cluster sim
@@ -319,6 +318,8 @@ day() {
 network round trip. It is not part of the daily pipeline — the cron job uses
 `coverage run` — and it is the reason this recipe no longer hand-writes an
 `INSERT` against the coverage table, which used to break whenever a column moved.
+`market set` is the same idea for the catalog row, so the whole recipe now runs
+through the CLI with no `sqlite3` at all.
 
 ### The thirteen days
 
