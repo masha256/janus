@@ -359,6 +359,12 @@ test("--size auto and --stop auto use the score plan sizing", async () => {
         assert.ok(sizingPlan, "stored plan has sizing_plan");
         assert.equal(opened.units[0].notional, sizingPlan.suggested_notional);
         assert.equal(opened.units[0].stop, sizingPlan.stop_price);
+        // The plan is read for --date, not today, and the risk it records is what
+        // the capped size can actually lose at that stop — not the risk budget the
+        // size was derived from. initial_risk is the denominator of every R.
+        const distPct = (130 - sizingPlan.stop_price) / 130;
+        assert.equal(opened.units[0].risk, opened.units[0].notional * distPct);
+        assert.equal(opened.units[0].risk, sizingPlan.risk_dollars);
         // Move mark higher and trail the stop automatically.
         withDb(file, (db) => {
             const assetId = requireAssetBySymbol(db, "BTC").id;

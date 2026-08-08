@@ -214,6 +214,26 @@ test("flat + strong bullish + trend gate pass + persisted -> INITIATE", () => {
     assert.equal(got.plan.trend_gate, "pass");
     assert.equal(got.plan.entry_plan?.side, "long");
 });
+test("the sizing plan scales with today's conviction, not the previous score's", () => {
+    const prev = {
+        direction: 1.8, conviction: 9, directive: "STAND_ASIDE",
+        plan: {
+            directive: "STAND_ASIDE", reason: "prior signal", size_tier: "blocked",
+            signal_gate: "pass", persistence_gate: "fail", trend_gate: "pass",
+            binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a",
+        },
+        results: {},
+    };
+    // Lift the per-asset cap so the budget, not the cap, decides the size —
+    // otherwise both convictions clamp to the same capped notional and the bug
+    // hides. Stop is 2 x atr 5 below a mark of 100, so the distance is 10%.
+    const params = { ...DEFAULT_PARAMS, per_asset_max_notional_pct: 100 };
+    const got = deriveScore(m(2, 2, 2, 50, false, false), ctxWithPosition({ side: null, units: 0 }, coverage(), prev), params);
+    assert.equal(got.conviction, 7, "today's conviction");
+    // 100000 * 5% * 0.7 = 3500 budget / 0.10 = 35000. Yesterday's 9 would give 45000.
+    assert.equal(got.plan.sizing_plan?.suggested_notional, 35000);
+    assert.equal(got.plan.sizing_plan?.risk_dollars, 3500);
+});
 test("flat + strong bullish + trend gate fail -> STAND_ASIDE", () => {
     const got = deriveScore(m(2, 2, 2, 50, false, false), ctxWithPosition({ side: null, units: 0 }, coverage({ px_vs_sma20: -2, px_vs_sma50: -5 })), DEFAULT_PARAMS);
     assert.equal(got.directive, "STAND_ASIDE");

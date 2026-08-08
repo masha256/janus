@@ -1,19 +1,27 @@
 /**
  * Position sizing based on risk and stop distance.
  *
- * Risk $  = Capital × Max Risk % × (Conviction / 10)
- * Size $  = Risk $ / Stop Distance %
- * Heat $  = Risk $  (before the stop moves to breakeven)
+ * Budget $ = Capital × Max Risk % × (Conviction / 10)
+ * Size $   = Budget $ / Stop Distance %, capped at the per-asset notional cap
+ * Risk $   = Size $ × Stop Distance %  (the budget only when the cap does not bind)
+ * Heat $   = Risk $  (before the stop moves to breakeven)
+ *
+ * Risk is derived back from the *capped* size, never from the budget: a capped
+ * position cannot lose the budget it was sized against. Reporting the budget
+ * would overstate `initial_risk` — every R milestone in the ladder is measured
+ * against it — and overcharge the heat gate.
  */
 export function sizeFromRiskAndStop(inputs) {
     const { capital, maxRiskPct, conviction, stopDistancePct, perAssetMaxNotionalPct } = inputs;
-    const riskDollars = capital * (maxRiskPct / 100) * (conviction / 10);
-    const positionSizeDollars = stopDistancePct > 0 ? riskDollars / stopDistancePct : 0;
+    const budgetDollars = capital * (maxRiskPct / 100) * (conviction / 10);
+    const positionSizeDollars = stopDistancePct > 0 ? budgetDollars / stopDistancePct : 0;
     const perAssetCapDollars = capital * (perAssetMaxNotionalPct / 100);
+    const cappedPositionSizeDollars = Math.min(positionSizeDollars, perAssetCapDollars);
+    const riskDollars = cappedPositionSizeDollars * stopDistancePct;
     return {
         riskDollars,
         positionSizeDollars,
-        cappedPositionSizeDollars: Math.min(positionSizeDollars, perAssetCapDollars),
+        cappedPositionSizeDollars,
         perAssetCapDollars,
         heatDollars: riskDollars,
     };
@@ -34,27 +42,6 @@ export function stopDistancePct(entry, stop, side) {
     const raw = side === "long" ? (entry - stop) / entry : (stop - entry) / entry;
     return Math.max(0, raw);
 }
-/**
- * Heat for a single unit, floored at zero (breakeven or better stops contribute no heat).
- */
-export function unitHeat(unit, direction) {
-    const sign = direction === "long" ? 1 : -1;
-    const size = unit.notional / unit.entry_price;
-    const distance = (unit.entry_price - unit.stop) * sign;
-    return Math.max(0, size * distance);
-}
-/**
- * Total heat across a set of units. A closed unit contributes no heat.
- */
-export function unitsHeat(units, direction) {
-    return units
-        .filter((u) => u.status === "open")
-        .reduce((sum, u) => sum + unitHeat(u, direction), 0);
-}
-/**
- * Sum of risk dollars across multiple open trades.
- * Each trade object supplies its direction and open units.
- */
-export function bookHeat(trades) {
-    return trades.reduce((sum, t) => sum + unitsHeat(t.units, t.direction), 0);
-}
+// Heat lives in trade-math.ts (unitHeat/unitsHeat) and db/repo/trade.ts
+// (bookHeat, over the open book). This module sizes a position; it does not
+// measure one.

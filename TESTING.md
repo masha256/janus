@@ -189,22 +189,20 @@ stop price, and projected heat after the trade.
 
 ### 9. Open the recommended trades
 
-Manual override (explicit everything):
-
-```bash
-janus trade open BTC --direction long --price 65000 --stop 62000 --risk 500 --notional 5000 --tag core
-janus trade open ETH --direction long --price 3400 --stop 3200 --risk 500 --notional 5000 --tag core
-```
-
-Auto from the latest score's sizing plan (operator still supplies entry price):
+From that day's sizing plan, which is what production does — the operator
+supplies only the fill price:
 
 ```bash
 janus trade open BTC --direction long --price 65000 --size auto --stop auto
 janus trade open ETH --direction long --price 3400 --size auto --stop auto
 ```
 
-Use `--size auto` to compute notional from capital/risk/ATR, and `--stop auto` to
-place the initial stop at `stop_atr_multiple × ATR` below the entry.
+`--size auto` takes `sizing_plan.suggested_notional`, and `--stop auto` places
+the initial stop at `stop_atr_multiple × ATR` below the entry. Risk is then
+`notional × stop distance` — the size actually taken, not the risk budget it was
+derived from.
+
+Manual override, when you deliberately want a size the plan did not pick:
 
 ```bash
 janus trade open BTC --direction long --price 65000 --stop 62000 --risk 500 --notional 5000 --tag core
@@ -264,15 +262,22 @@ matching, something in the gates or the ladder changed.
 ### The price path
 
 The asset is a synthetic `SIM` at a starting price of 100 so the R arithmetic
-stays legible. One unit is $10,000 notional with a stop 5% away, which makes
-**1R = $500** and puts the milestones on round numbers:
+stays legible. Every entry is sized by the system (`--size auto --stop auto`),
+which is what production does — nothing here is a hand-picked dollar figure.
+
+ATR is pinned at 2.5 throughout, so with `stop_atr_multiple=2` the stop always
+sits 5 below entry: a **5% stop**. At the default `account_capital=100000` and
+`per_asset_max_notional_pct=20` the per-asset cap binds, so the first unit comes
+out at **$20,000 notional, risking $1,000 — 1R = $1,000**. That puts the ladder
+milestones on round marks:
 
 | Mark | 105 | 107.5 | 110 |
 | --- | --- | --- | --- |
 | Unrealized R on the first unit | +1.0R | +1.5R | +2.0R |
 
-ATR is pinned at 2.5 throughout, so the trailing stop (`trailing_atr_multiple=2`)
-always sits 5 below the mark.
+R is where the stop is, not how big the unit is, so those marks hold at any
+account size — see the `account_capital` variation below. The trailing stop
+(`trailing_atr_multiple=2`) likewise always sits 5 below the mark.
 
 ### Setup
 
@@ -324,35 +329,39 @@ through the CLI with no `sqlite3` at all.
 ### The thirteen days
 
 Run these in order. Each `day` line prints the score envelope; the `janus trade`
-lines are the operator acting on the directive it produced.
+lines are the operator acting on the directive it produced. Every one of them
+takes its size and stop from that day's plan — `--size auto` reads
+`sizing_plan.suggested_notional`, `--stop auto` trails from ATR, and the
+`--fraction 0.5` on day 5 is the `trim_fraction` the ladder returned. Only
+`--price` is the operator's, because only the fill is.
 
 ```bash
 #   date       mark  px20 px50 px200  cat trend sec  crowd  div
 day 2026-03-02 98    1.0  0.5   8.0    2   2     1    50     0
 day 2026-03-03 100   1.5  1.0   9.0    2   2     1    50     0
-janus trade open SIM --direction long --price 100 --stop 95 \
-  --risk 500 --notional 10000 --tag core --date 2026-03-03
+janus trade open SIM --direction long --price 100 --size auto --stop auto \
+  --tag core --date 2026-03-03
 
 day 2026-03-04 101   1.5  1.0   9.0    1   2     1    50     0
 day 2026-03-05 105   2.0  1.5  10.0    1   2     1    50     0
-janus trade set-stop 1 --stop 100
+janus trade set-stop 1 --stop auto
 
 day 2026-03-06 107.5 2.5  2.0  11.0    1   2     1    50     0
 janus trade exit 1 --unit 1 --fraction 0.5 --price 107.5 --date 2026-03-06
 
 day 2026-03-07 108   2.5  2.0  12.0    2   2     1    50     0
-janus trade add-unit 1 --price 108 --stop 103 \
-  --risk 500 --notional 10000 --tag add1 --date 2026-03-07
+janus trade add-unit 1 --price 108 --size auto --stop auto \
+  --tag add1 --date 2026-03-07
 
 day 2026-03-08 110   3.0  2.5  14.0    2   2     1    50     0
-janus trade add-unit 1 --price 110 --stop 105 \
-  --risk 500 --notional 10000 --tag add2 --date 2026-03-08
+janus trade add-unit 1 --price 110 --size auto --stop auto \
+  --tag add2 --date 2026-03-08
 
 day 2026-03-09 112   3.5  3.0  16.0    2   2     1    50     0
-janus trade set-stop 1 --stop 107
+janus trade set-stop 1 --stop auto
 
 day 2026-03-10 115   4.0  3.5  22.0    2   2     1    88     0
-janus trade set-stop 1 --stop 110
+janus trade set-stop 1 --stop auto
 
 day 2026-03-11 113   3.5  3.0  21.0    1   1     1    70     0
 day 2026-03-12 111   2.0  1.5  18.0    0   0     0    50     1
@@ -391,9 +400,9 @@ janus trade show 1
 ```json
 {
   "trade":   { "status": "closed", "opened_on": "2026-03-03", "closed_on": "2026-03-13",
-               "initial_price": 100, "initial_stop": 95, "initial_risk": 500 },
+               "initial_price": 100, "initial_stop": 95, "initial_risk": 1000 },
   "summary": { "open_units": 0, "closed_units": 4, "open_risk": 0,
-               "realized_pnl": 1011.87, "r_multiple": 2.02, "net_r_multiple": 2.02 }
+               "realized_pnl": 2023.74, "r_multiple": 2.02, "net_r_multiple": 2.02 }
 }
 ```
 
@@ -422,10 +431,14 @@ make each one visible:
    *add* is `seq 3`, which is why day 11 trims `--unit 3`. Check `trade show`
    before targeting a unit by sequence.
 
-3. **The suggested size is not the size used here.** Day 2's plan suggests
-   `notional=20000, risk=3500`; the recipe opens 10000/500 anyway, to keep 1R at
-   a round $500. Use `--size auto --stop auto` when you want to exercise the
-   sizing path instead.
+3. **Units are not all the same size, and risk is not the budget.** Every entry
+   here hits the per-asset notional cap at $20,000, but the risk differs by unit
+   — $1,000 on the day-2 entry (stop 5.00% away), $925.93 on the day-6 add (stop
+   103 against a 108 entry is 4.63%), $909.09 on day 7. Risk is always
+   `notional × stop distance`, derived from the size actually taken; it is *not*
+   the `capital × max_risk% × conviction/10` budget the size was computed from.
+   Those two only coincide when the cap does not bind. `initial_risk` is the
+   denominator of every R in the ladder, so this distinction is load-bearing.
 
 ### Variations worth trying
 
@@ -445,11 +458,17 @@ janus param set max_units 2
 # One weak day is enough. Day 11's TRIM becomes an EXIT on the decay rung.
 janus param set decay_persist_days 1
 
-# Day 2 still initiates — the sizing plan scales with capital, so a smaller
-# account proposes a smaller unit and the gate cannot block itself. From day 3
-# on, heat_gate=blocked, because the recipe's hardcoded $500 unit is already
-# over the $150 cap.
+# Nothing changes. Every directive, every rung, and the final 2.02R are
+# identical; only the dollars shrink 100x, to $200 units risking $10. Sizing
+# scales with capital and R is measured against the stop, so the whole recipe is
+# scale-invariant now that it trades what the system suggests.
 janus param set account_capital 1000
+
+# The heat gate, which the defaults never reach: the $1,000 first unit is now
+# the entire book's budget. Day 1 gains `heat` to its blocked list
+# (`long entry blocked by persistence, heat gate(s)`) and day 8's HOLD changes
+# cause — `thesis intact; add blocked by heat gate(s)` instead of the unit cap.
+janus param set max_heat_pct 1
 ```
 
 Reset by deleting the database and re-running from **Setup** — parameters are

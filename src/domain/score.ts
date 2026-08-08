@@ -366,7 +366,7 @@ function derivePlan(
 
   // Compute proposed heat now that the tier is known (starter scales the sizing plan),
   // then re-evaluate heatGate so it sees the scaled risk.
-  const proposedHeat = buildProposedHeat(position, side, context, params, sizeTier);
+  const proposedHeat = buildProposedHeat(position, side, context, params, sizeTier, conviction);
   const heat = heatGate(params, context.current_heat ?? 0, proposedHeat);
 
   // Regime extreme-contrarian trigger.
@@ -447,7 +447,7 @@ function derivePlan(
         flipflop_gate: flipflop,
       };
     } else {
-      sizingPlan = buildSizingPlan(side, context, params, sizeTier);
+      sizingPlan = buildSizingPlan(side, context, params, sizeTier, conviction);
       plan = {
         directive: "INITIATE",
         reason: `direction ${direction.toFixed(2)} conviction ${conviction} + gates pass${sizeTier === "starter" ? " (starter tier)" : ""}`,
@@ -518,7 +518,7 @@ function derivePlan(
           : undefined,
       };
     } else if (aligned && sizeTier !== "blocked" && posUnits < maxUnits && isWorking) {
-      sizingPlan = buildSizingPlan(posSide, context, params, sizeTier);
+      sizingPlan = buildSizingPlan(posSide, context, params, sizeTier, conviction);
       plan = {
         directive: "ADD",
         reason: `position working, direction ${direction.toFixed(2)} conviction ${conviction} allow add${sizeTier === "starter" ? " (starter tier)" : ""}`,
@@ -662,10 +662,11 @@ function buildProposedHeat(
   context: ScoreContext,
   params: Record<string, number>,
   sizeTier: ScorePlan["size_tier"],
+  conviction: number,
 ): number {
   if (position.side !== null) return 0; // existing position adds no new heat in this decision
   if (side === null) return 0;
-  const sizing = buildSizingPlan(side, context, params, sizeTier);
+  const sizing = buildSizingPlan(side, context, params, sizeTier, conviction);
   return sizing?.risk_dollars ?? 0;
 }
 
@@ -674,6 +675,8 @@ function buildSizingPlan(
   context: ScoreContext,
   params: Record<string, number>,
   sizeTier: ScorePlan["size_tier"],
+  /** Today's conviction — the same one the directive branches read. */
+  conviction: number,
 ): ScorePlan["sizing_plan"] | undefined {
   const capital = params["account_capital"] ?? 0;
   const coverage = context.asset.coverage;
@@ -697,7 +700,7 @@ function buildSizingPlan(
   const result = sizeFromRiskAndStop({
     capital,
     maxRiskPct,
-    conviction: context.previous_score?.conviction ?? params["signal_conviction_initiate"] ?? 6,
+    conviction,
     stopDistancePct: distPct,
     perAssetMaxNotionalPct: params["per_asset_max_notional_pct"] ?? 20,
   });

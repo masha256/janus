@@ -108,6 +108,7 @@ function open(symbol, opts) {
             params,
             coverage,
             db,
+            on,
             mode: "open",
         });
         const id = openTrade(db, {
@@ -132,7 +133,8 @@ function add(raw, opts) {
         const trade = getTrade(db, id);
         const asset = requireAssetBySymbol(db, trade.trade.symbol);
         const params = resolveParams(getClusterParams(db, asset.cluster_id), getGlobalParams(db));
-        const coverage = latestCoverage(db, asset.id, opts.date ?? todayNY())?.values;
+        const on = opts.date ?? todayNY();
+        const coverage = latestCoverage(db, asset.id, on)?.values;
         const resolved = resolveEntryInputs({
             direction: trade.trade.direction,
             price: opts.price,
@@ -145,10 +147,11 @@ function add(raw, opts) {
             params,
             coverage,
             db,
+            on,
             mode: "add",
         });
         const seq = addUnit(db, id, {
-            entry_on: opts.date ?? todayNY(),
+            entry_on: on,
             price: resolved.price,
             stop: resolved.stop,
             risk: resolved.risk,
@@ -212,6 +215,11 @@ function list(opts) {
 }
 function resolveEntryInputs(opts) {
     const auto = {};
+    // The score to size against is the one for the entry date, not today's. A
+    // backdated entry that read today's score would silently fall through to the
+    // no-plan path and size itself off the raw stop distance instead.
+    const score = getScore(opts.db, opts.on, opts.assetId);
+    const sizing = score?.plan?.sizing_plan;
     // Price must always be supplied by the operator.
     const price = positive(opts.price, "price");
     // Stop: explicit, auto from ATR, or pulled from the latest sizing plan.
@@ -225,13 +233,11 @@ function resolveEntryInputs(opts) {
         stop = stopFromAtr(price, atr, opts.params["stop_atr_multiple"] ?? 2, opts.direction);
     }
     else if (opts.stop === undefined) {
-        // Fall back to the latest score's sizing plan if available.
-        const score = getScore(opts.db, todayNY(), opts.assetId);
-        const sizingStop = score?.plan?.sizing_plan?.stop_price;
-        if (sizingStop === undefined) {
+        // Fall back to the entry date's sizing plan if available.
+        if (sizing?.stop_price === undefined) {
             throw new JanusError("VALIDATION", "--stop is required unless a sizing plan exists");
         }
-        stop = sizingStop;
+        stop = sizing.stop_price;
     }
     else {
         stop = positive(opts.stop, "stop");
@@ -240,8 +246,6 @@ function resolveEntryInputs(opts) {
     let notional;
     if (opts.size === "auto") {
         auto.size = true;
-        const score = getScore(opts.db, todayNY(), opts.assetId);
-        const sizing = score?.plan?.sizing_plan;
         if (sizing !== undefined) {
             notional = sizing.suggested_notional;
         }
@@ -261,30 +265,25 @@ function resolveEntryInputs(opts) {
         }
     }
     else if (opts.notional === undefined) {
-        const score = getScore(opts.db, todayNY(), opts.assetId);
-        const sizingNotional = score?.plan?.sizing_plan?.suggested_notional;
-        if (sizingNotional === undefined) {
+        if (sizing?.suggested_notional === undefined) {
             throw new JanusError("VALIDATION", "--notional or --size auto is required");
         }
-        notional = sizingNotional;
+        notional = sizing.suggested_notional;
     }
     else {
         notional = positive(opts.notional, "notional");
     }
-    // Risk: explicit or computed from sizing plan / stop distance.
+    // Risk: explicit, else derived from the size and stop actually being used.
+    // Not read off the plan — an overridden --notional or --stop would leave the
+    // plan's risk_dollars describing a position nobody opened, and initial_risk is
+    // what every R milestone in the ladder is measured against.
     let risk;
     if (opts.risk !== undefined) {
         risk = num(opts.risk, "risk", 0, RISK_MAX);
     }
     else {
-        const score = getScore(opts.db, todayNY(), opts.assetId);
-        if (score?.plan?.sizing_plan?.risk_dollars !== undefined) {
-            risk = score.plan.sizing_plan.risk_dollars;
-        }
-        else {
-            const distPct = stopDistancePct(price, stop, opts.direction);
-            risk = distPct > 0 ? notional * distPct : 0;
-        }
+        const distPct = stopDistancePct(price, stop, opts.direction);
+        risk = distPct > 0 ? notional * distPct : 0;
     }
     return { price, stop, risk, notional, auto };
 }

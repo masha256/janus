@@ -4,7 +4,7 @@ import { openDb } from "../connect.ts";
 import { migrate } from "../migrate.ts";
 import { upsertMarkets } from "./market.ts";
 import { addAsset, requireAssetBySymbol } from "./asset.ts";
-import { openTrade, addUnit, setStop, exitUnits, getTrade, listTrades, partialExitUnit, openTradeForAsset } from "./trade.ts";
+import { openTrade, addUnit, setStop, exitUnits, getTrade, listTrades, partialExitUnit, openTradeForAsset, bookHeat } from "./trade.ts";
 import { positionOf } from "./score.ts";
 
 const NOW = "2026-07-31T12:00:00Z";
@@ -276,5 +276,25 @@ test("a short books a gain when price falls", () => {
   const t = getTrade(db, id) as { summary: { realized_pnl: number } };
   // size 5, (80 - 100) * 5 * -1 = 100
   assert.equal(t.summary.realized_pnl, 100);
+  db.close();
+});
+
+test("bookHeat sums open trades and drops units stopped at breakeven", () => {
+  const db = fresh();
+  upsertMarkets(db, [
+    { symbol: "ETH", market_id: 2, market_type: "perp", status: "active", price_decimals: 1, size_decimals: 5, listed_at: "2025-01-01" },
+  ], NOW);
+  addAsset(db, "ETH", "crypto", null, null, NOW);
+
+  // Two trades, one unit each: size 10 at a 10-wide stop is 100 of heat apiece.
+  const btc = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
+  const eth = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "ETH").id }, NOW);
+  assert.equal(bookHeat(db), 200);
+
+  // Breakeven frees the capacity the heat gate charges for; it never goes negative.
+  setStop(db, btc, 100);
+  assert.equal(bookHeat(db), 100);
+  setStop(db, eth, 110);
+  assert.equal(bookHeat(db), 0);
   db.close();
 });
