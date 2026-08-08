@@ -230,7 +230,9 @@ confidence is treated as zero.
   and optional divergence/capitulation boosts.
 - `direction` is the weighted mean of `catalyst`, `sentiment`, `trend`,
   `regime_smile` (from the screen), and `secular`, normalized by total |weight|.
-- `conviction` fuses direction magnitude, factor agreement, and confidence.
+- `conviction` fuses direction magnitude, factor agreement, and confidence into
+  a whole number 1–10. It is an output, distinct from the `confidence` factor
+  you supply.
 - The final `directive` ladder produces `INITIATE`, `ADD`, `HOLD`, `TRIM`,
   `EXIT`, or `STAND_ASIDE`, plus a `ScorePlan` with sizing and stop hints.
 
@@ -290,11 +292,18 @@ re-reason it:
 ```bash
 janus macro reads --date YYYY-MM-DD   # macro regime metric and summary
 janus cluster reads --date YYYY-MM-DD # per-cluster regime metric and summary
-janus score list --date YYYY-MM-DD    # direction, conviction, directive, plan, rationale
+janus score list --date YYYY-MM-DD    # direction, conviction, directive, rationale, results
+janus score show <SYMBOL>             # the same row plus the nested `plan`
 janus cluster list                    # cluster_id -> cluster name
 janus trade list --open               # every open trade and its id
 janus trade show <TRADE_ID>           # units, summary, progress (unrealized P&L / R)
 ```
+
+`score list` carries the plan flattened into `results` (`sizing_suggested_notional`,
+`stop_action`, `trim_target_units`, `entry_max_units`, …) and names the position
+`position_state`. `score show` returns the nested `plan` object and calls it
+`position`. Field paths below use the `score show` shape; read them off `results`
+under their flat names if you only ran `score list`.
 
 ### File structure
 
@@ -362,7 +371,8 @@ that were not flagged today. Sort by absolute `unrealized_r`, descending.
 - **Trade** — trade id, e.g. `#14`.
 - **Asset** — symbol, e.g. `BTC`.
 - **Cluster** — cluster name from `janus cluster list`; `—` if none.
-- **Side** — `trade.direction`: `long` or `short`.
+- **Side** — the trade's `direction`: `long` or `short`. Flat on
+  `trade list` rows, nested under `trade` on `trade show`.
 - **Units** — `summary.open_units`, plus closed count when any have exited,
   e.g. `2` or `2 (+1 closed)`.
 - **Avg entry** — `summary.avg_entry`, at the asset's normal price precision.
@@ -394,14 +404,15 @@ descending.
 
 - **Asset**, **Cluster** — as in table 1.
 - **Directive** — verbatim: `INITIATE`, `ADD`, `TRIM`, `EXIT`.
-- **Position** — `position` as stored, e.g. `long:2`; `flat` for a new entry.
+- **Position** — `position` / `position_state` as stored, e.g. `long:2`; `flat`
+  for a new entry.
 - **Direction** — `direction` to 2 decimals, signed, e.g. `+0.84`.
-- **Conviction** — `conviction` to 2 decimals, e.g. `0.61`.
+- **Conviction** — the stored `conviction`, a whole number 1–10, e.g. `7`.
 - **Action** — the executable detail, from the stored `plan`:
 
   | Directive | Action cell |
   | --- | --- |
-  | `INITIATE` | `<side> · unit $<sizing_plan.suggested_notional> · risk $<sizing_plan.risk_dollars> · stop <sizing_plan.stop_price> (<stop_distance_pct>%) · tier <size_tier> · max <entry_plan.max_units>u` |
+  | `INITIATE` | `<side> · unit $<sizing_plan.suggested_notional> · risk $<sizing_plan.risk_dollars> · stop <sizing_plan.stop_price> (<sizing_plan.stop_distance_pct>%) · tier <size_tier> · max <entry_plan.max_units>u` |
   | `ADD` | same as INITIATE, prefixed `add unit N of <max_units>` |
   | `TRIM` | `trim to <trim_plan.target_units>u, cut <trim_plan.which>` |
   | `EXIT` | `exit all units` |
@@ -428,10 +439,12 @@ descending.
 
 - **Asset**, **Cluster**, **Direction**, **Conviction**, **Rationale** — as above.
 - **Directive** — verbatim, normally `STAND_ASIDE`.
-- **Why not** — the first failing gate from the stored `plan`
-  (`signal_gate`, `persistence_gate`, `trend_gate`, `binary_gate`, `heat_gate`,
-  `flipflop_gate`), e.g. `trend_gate: fail`. Use `plan.reason` when no gate
-  failed.
+- **Why not** — the first non-passing gate from the stored `plan`, in the order
+  `signal_gate`, `persistence_gate`, `trend_gate`, `binary_gate`, `heat_gate`,
+  `flipflop_gate`, printed `<gate>: <value>` verbatim. Values differ by gate:
+  `fail` for signal/persistence, `fail`/`starter`/`late_trend` for trend,
+  `blocked` for binary/heat/flipflop — e.g. `trend_gate: late_trend` or
+  `heat_gate: blocked`. Use `plan.reason` when every gate passed.
 
 ### Rules
 
