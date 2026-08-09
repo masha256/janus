@@ -19,22 +19,25 @@ export function deriveLadderPlan(inputs) {
         const pnl = openUnits.reduce((a, u) => a + (u.notional / u.entry_price) * (mark - u.entry_price) * sign, 0);
         return pnl / Math.abs(initialRisk);
     })();
-    // Time stop: position open too long without reaching target.
+    const anyBreakevenOrBetter = openUnits.some((u) => (u.stop - u.entry_price) * sign >= 0);
+    // Time stop: the thesis never worked. It only applies while the position is
+    // still fully at risk — a unit at breakeven or a trade past its +1R milestone
+    // is a winner being managed by the trail, and a clock must not exit it.
     // openedOn is earlier, today is later, so compute (today - openedOn).
     const daysOpen = daysBetween(today, openedOn);
-    const timeStopHit = daysOpen !== null && daysOpen >= timeStopDays;
+    const neverWorked = !anyBreakevenOrBetter && (unrealizedR === null || unrealizedR < breakevenR);
+    const timeStopHit = daysOpen !== null && daysOpen >= timeStopDays && neverWorked;
     if (timeStopHit) {
         return {
             event: "time_stop",
             action: "time_exit",
             affected_units: "all",
-            rationale: `position open ${daysOpen} days, time stop reached`,
+            rationale: `position open ${daysOpen} days without earning breakeven, time stop reached`,
         };
     }
     // Signal decay exit logic.
     // Pre-breakeven: any decay signal exits immediately.
     // Post-breakeven: require two consecutive run-days of confirmation.
-    const anyBreakevenOrBetter = openUnits.some((u) => (u.stop - u.entry_price) * sign >= 0);
     if (decaySignal) {
         if (!anyBreakevenOrBetter) {
             return {

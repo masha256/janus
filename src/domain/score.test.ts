@@ -52,23 +52,23 @@ test("direction is the weighted mean of factors normalised by total |weight|", (
     DEFAULT_PARAMS,
   );
   // P=50 -> calm middle, trend>0 -> sentiment = 0.4 * 1.25 fear premium = 0.5
-  // weights: catalyst 0.25, sentiment 0.25, trend 0.3, regime 0.15, secular 0.05
-  // weighted sum = 0.25*2 + 0.25*0.5 + 0.3*1 + 0.15*0 + 0.05*(-1) = 0.875
-  // total |weight| = 1.0, so direction = 0.875
-  assert.ok(Math.abs(got.direction - 0.875) < 1e-12, `got ${got.direction}`);
+  // weights: catalyst 0.15, sentiment 0.3, trend 0.3, regime 0.15, secular 0.1
+  // weighted sum = 0.15*2 + 0.3*0.5 + 0.3*1 + 0.15*0 + 0.1*(-1) = 0.65
+  // total |weight| = 1.0, so direction = 0.65
+  assert.ok(Math.abs(got.direction - 0.65) < 1e-12, `got ${got.direction}`);
   assert.equal(got.results["regime"], 0);
   assert.equal(got.results["regime_smile"], 0);
-  assert.ok(Math.abs((got.results["weighted_sum"] as number) - 0.875) < 1e-12);
+  assert.ok(Math.abs((got.results["weighted_sum"] as number) - 0.65) < 1e-12);
   assert.equal(got.results["total_abs_weight"], 1.0);
 });
 
 test("direction stays in range when weights do not sum to 1", () => {
-  // Every weight doubled: raw sum would be 1.75, but the normalised mean is unchanged.
+  // Every weight doubled: raw sum would be 1.3, but the normalised mean is unchanged.
   const doubled = Object.fromEntries(
     Object.entries(DEFAULT_PARAMS).map(([k, v]) => [k, k.startsWith("w_") ? v * 2 : v]),
   );
   const got = deriveScore(m(2, 1, -1, 50, false, false), flat, doubled);
-  assert.ok(Math.abs(got.direction - 0.875) < 1e-12, `got ${got.direction}`);
+  assert.ok(Math.abs(got.direction - 0.65) < 1e-12, `got ${got.direction}`);
   assert.equal(got.results["total_abs_weight"], 2.0);
 });
 
@@ -159,12 +159,12 @@ test("divergence booster size is a cluster-tunable param", () => {
 
 test("confidence is the scoring metric's own 0..1 quality, not inherited from the screen", () => {
   const highConf = deriveScore(
-    m(2, 0, 0, 50, false, false, 1),
+    m(2, 1, 1, 50, false, false, 1),
     ctx(0, null),
     DEFAULT_PARAMS,
   );
   const lowConf = deriveScore(
-    m(2, 0, 0, 50, false, false, 0.3),
+    m(2, 1, 1, 50, false, false, 0.3),
     ctx(0, null),
     DEFAULT_PARAMS,
   );
@@ -205,9 +205,10 @@ test("agreement is snapshotted: 1 when all aligned, less when factors cancel", (
   );
   assert.ok(Math.abs((aligned.results["agreement"] as number) - 1) < 1e-12);
 
-  // catalyst +2 vs trend -2, sentiment +0.4 (crowding 50), regime 0, secular 0
+  // catalyst +2 vs trend -1, sentiment -0.4 (crowding 50, sign of trend),
+  // regime 0, secular 0: contributions 0.3 vs -0.42 nearly cancel.
   const mixed = deriveScore(
-    m(2, -2, 0, 50, false, false),
+    m(2, -1, 0, 50, false, false),
     flat,
     DEFAULT_PARAMS,
   );
@@ -249,11 +250,11 @@ test("a quiet second day still INITIATES when trend and sentiment persist", () =
     results: {},
   };
   // Day 2: no fresh headline, but yesterday's catalyst is still driving flow
-  // (1.0), the trend is still strong, and sentiment is slightly fearful.
+  // (1.0), the trend is still strong, and sentiment is fearful (crowding 30).
   // With signal_direction_initiate = 0.9 and the persistence rule satisfied,
   // this must INITIATE rather than stand aside.
   const got = deriveScore(
-    m(1.0, 2, 0.5, 35, false, false),
+    m(1.0, 2, 0.5, 30, false, false),
     ctxWithPosition({ side: null, units: 0 }, coverage(), day1),
     DEFAULT_PARAMS,
   );
@@ -367,9 +368,9 @@ test("the sizing plan scales with today's conviction, not the previous score's",
     params,
   );
   assert.equal(got.conviction, 7, "today's conviction");
-  // 100000 * 5% * 0.7 = 3500 budget / 0.10 = 35000. Yesterday's 9 would give 45000.
-  assert.equal(got.plan.sizing_plan?.suggested_notional, 35000);
-  assert.equal(got.plan.sizing_plan?.risk_dollars, 3500);
+  // 100000 * 2.5% * 0.7 = 1750 budget / 0.10 = 17500. Yesterday's 9 would give 22500.
+  assert.equal(got.plan.sizing_plan?.suggested_notional, 17500);
+  assert.equal(got.plan.sizing_plan?.risk_dollars, 1750);
 });
 
 test("flat + strong bullish + trend gate fail -> STAND_ASIDE", () => {
@@ -613,8 +614,8 @@ test("a HOLD takes its stop_plan from the ladder", () => {
   assert.equal(plan.directive, "HOLD");
   assert.equal(plan.stop_plan?.event, "runner");
   assert.equal(plan.stop_plan?.action, "trail");
-  // mark 130 - 2 * atr 5 = 120, floored at entry 100
-  assert.equal(plan.stop_plan?.new_stop, 120);
+  // mark 130 - 3 * atr 5 = 115, floored at entry 100
+  assert.equal(plan.stop_plan?.new_stop, 115);
   assert.notEqual(plan.stop_plan?.rationale, "review stop/exit plan, no change today");
 });
 
@@ -627,12 +628,13 @@ test("a stop still below entry puts the ladder on the breakeven rung", () => {
 });
 
 test("a ladder time_stop escalates a HOLD to EXIT", () => {
-  // opened 2026-01-01 against session_date 2026-07-31 is well past 42 days
-  const c = contextWithOpenTrade({ mark: 105, atr14: 5, stop: 100, openedOn: "2026-01-01" });
+  // opened 2026-01-01 against session_date 2026-07-31 is well past 42 days,
+  // and the stop is still below entry with the mark under +1R: never worked.
+  const c = contextWithOpenTrade({ mark: 105, atr14: 5, stop: 90, openedOn: "2026-01-01" });
   const { plan } = deriveScore(holdMetrics, c, PARAMS);
   assert.equal(plan.directive, "EXIT");
   assert.equal(plan.stop_plan?.event, "time_stop");
-  assert.match(plan.reason, /\(ladder: position open \d+ days, time stop reached\)/);
+  assert.match(plan.reason, /\(ladder: position open \d+ days without earning breakeven, time stop reached\)/);
 });
 
 test("an EXIT directive keeps its own stop_plan", () => {
@@ -690,10 +692,11 @@ test("an escalated EXIT drops the ADD's sizing_plan and entry_plan", () => {
   assert.equal(control.directive, "ADD");
   assert.ok(control.sizing_plan, "control ADD carries a sizing_plan to be dropped");
 
-  // Same thing, 42+ days old: the ladder's time stop escalates it to EXIT.
+  // Same thing, 42+ days old and still fully at risk (stop below entry, mark
+  // under +1R): the ladder's time stop escalates it to EXIT.
   const stale: ScoreContext = {
     ...contextWithOpenTrade({
-      mark: 130, atr14: 5, stop: 100, partialExited: true, openedOn: "2026-01-01",
+      mark: 105, atr14: 5, stop: 90, openedOn: "2026-01-01",
     }),
     recent_scores: [strongPrior],
   };

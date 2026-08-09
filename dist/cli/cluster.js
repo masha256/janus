@@ -3,7 +3,7 @@ import { addCluster, listClusters, requireClusterByKey, setClusterParam, getClus
 import { listAssets } from "../db/repo/asset.js";
 import { recordClusterRead, listClusterReads, getMacro } from "../db/repo/phase.js";
 import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.js";
-import { resolveParams } from "../domain/params.js";
+import { GLOBAL_ONLY_PARAMS, resolveParams } from "../domain/params.js";
 import { deriveClusterRead } from "../domain/read.js";
 import { assertPhaseOrder, nowIso } from "../domain/session.js";
 import { finite, metricPairs, readText, required, unknownVerb } from "./args.js";
@@ -82,7 +82,11 @@ function show(key) {
 function setParam(key, param, value) {
     return withDb((db) => {
         const cluster = requireClusterByKey(db, required(key, "key"));
-        setClusterParam(db, cluster.id, required(param, "param"), finite(value, "value"));
+        const name = required(param, "param");
+        if (GLOBAL_ONLY_PARAMS.has(name)) {
+            throw new JanusError("VALIDATION", `${name} is account-scope and cannot be set per cluster; use \`janus param set\``);
+        }
+        setClusterParam(db, cluster.id, name, finite(value, "value"));
         return { cluster: cluster.key, params: getClusterParams(db, cluster.id) };
     });
 }

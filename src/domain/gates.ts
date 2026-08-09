@@ -174,14 +174,22 @@ export function flipflopGate(
   return persistOk ? "pass" : "blocked";
 }
 
+/**
+ * Extreme-contrarian trigger on the RAW regime read, not regime_smile. The
+ * smile already flips sign at extremes (euphoric regime → negative smile) and
+ * is capped at |1.2| by construction, so triggering on smile extremes was both
+ * unreachable at default beta_factor and inverted. Raw regime is -2..2:
+ * >= long_max means euphoria (block new longs), <= short_min means panic
+ * (block new shorts).
+ */
 export function regimeTriggerState(
-  regimeSmile: number,
+  regime: number,
   params: Record<string, number>,
 ): ScorePlan["regime_trigger"] {
   const longMax = params["regime_trigger_long_max"] ?? 1.5;
   const shortMin = params["regime_trigger_short_min"] ?? -1.5;
-  if (regimeSmile >= longMax) return "extreme_bull";
-  if (regimeSmile <= shortMin) return "extreme_bear";
+  if (regime >= longMax) return "extreme_bull";
+  if (regime <= shortMin) return "extreme_bear";
   return "none";
 }
 

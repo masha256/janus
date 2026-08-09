@@ -126,8 +126,9 @@ test("re-scoring replaces the previous metric rows rather than merging them", as
             assert.deepEqual(keys("score_result"), [
                 "agreement", "binary_gate", "confidence", "directive_reason", "divergence_boost", "fear_premium",
                 "flipflop_gate", "heat_gate", "persistence_gate", "persistence_rule", "plan_directive", "regime",
-                "regime_smile", "sentiment", "sentiment_summary", "signal_gate", "size_tier", "total_abs_weight",
-                "trend_gate", "w_catalyst", "w_regime", "w_secular", "w_sentiment", "w_trend", "weighted_sum",
+                "regime_smile", "regime_trigger", "sentiment", "sentiment_summary", "signal_gate", "size_tier",
+                "total_abs_weight", "trend_gate", "w_catalyst", "w_regime", "w_secular", "w_sentiment", "w_trend",
+                "weighted_sum",
             ], "nor stale results");
         });
     });

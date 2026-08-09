@@ -292,9 +292,9 @@ HOLD/EXIT/TRIM directives still carry the gate status for observability.
 | Parameter | Gate | Default | Description |
 | --- | --- | --- | --- |
 | `signal_direction_initiate` | signalGate | `0.9` | Minimum `\|direction\|` for a flat asset to pass the signal gate. |
-| `signal_conviction_initiate` | signalGate | `6` | Minimum `conviction` for a flat asset to pass the signal gate. |
+| `signal_conviction_initiate` | signalGate | `5` | Minimum `conviction` for a flat asset to pass the signal gate. |
 | `signal_direction_add` | signalGate | `1.0` | Minimum `\|direction\|` for an aligned position to pass the signal gate for adding. |
-| `signal_conviction_add` | signalGate | `7` | Minimum `conviction` for an aligned position to pass the signal gate for adding. |
+| `signal_conviction_add` | signalGate | `6` | Minimum `conviction` for an aligned position to pass the signal gate for adding. |
 | `signal_direction_exit` | signalGate | `1.0` | Minimum `\|direction\|` against an open position to pass the signal gate for exit. |
 | `signal_persist_days` | persistenceGate | `2` | Run-days the signal gate must have passed, including today. |
 | `trend_sma20_threshold_long` | trendGate | `0` | Long `px_vs_sma20` must be > threshold to be starter or pass. |
@@ -303,14 +303,20 @@ HOLD/EXIT/TRIM directives still carry the gate status for observability.
 | `trend_sma50_threshold_short` | trendGate | `0` | Short `px_vs_sma50` must be <= threshold to be pass (above is starter). |
 | `late_trend_ma_distance` | trendGate | `20` | Distance beyond the 200-day MA that, with extreme crowding, marks a move as `late_trend`. |
 | `late_trend_crowding_extreme` | trendGate | `85` | Crowding level that, with a stretched 200-day MA distance, marks a move as `late_trend`. |
-| `binary_cooldown_days` | binaryGate | `14` | Days after a recorded binary event during which entry is blocked. |
+| `binary_cooldown_days` | binaryGate | `14` | Days ahead of a recorded binary event during which entry is blocked; entry reopens once the event has passed. |
 | `flipflop_cooldown_days` | flipflopGate | `5` | Days after an exit during which opposite-side re-entry faces extra scrutiny. |
 | `flipflop_opposite_direction_min` | flipflopGate | `0.6` | Minimum `\|direction\|` for opposite-side re-entry during the flipflop cooldown. |
 | `flipflop_opposite_persist_days` | flipflopGate | `3` | Run-days the opposite-side signal must have persisted to override the flipflop cooldown. |
 | `account_capital` | heatGate | `100000` | Total investable account capital used for sizing and heat calculations. |
-| `max_heat_pct` | heatGate | `15` | Account-level heat ceiling as a percent of `account_capital`. |
-| `per_trade_max_risk_pct` | heatGate | `5` | Max risk per trade as a percent of `account_capital` before conviction scaling. |
+| `max_heat_pct` | heatGate | `10` | Account-level heat ceiling as a percent of `account_capital`. |
+| `per_trade_max_risk_pct` | heatGate | `2.5` | Max risk per trade as a percent of `account_capital` before conviction scaling. |
 | `per_asset_max_notional_pct` | heatGate | `20` | Hard per-asset notional cap as a percent of `account_capital`. |
+
+`account_capital`, `max_heat_pct`, and `per_trade_max_risk_pct` are **account-scope**:
+heat is measured across the whole book, so a per-cluster ceiling would make the same
+book pass or fail depending on which cluster's asset is being scored.
+`cluster set-param` refuses them, and any cluster rows written before that guard
+existed are ignored at resolve time. Set them with `janus param set` only.
 
 `trendGate` is a three-tier gate driven only by price vs the 20-day and 50-day MAs:
 
@@ -357,10 +363,13 @@ actionable_direction_delta`.
 
 ### Regime triggers
 
-`regime_smile` from the screen can trigger extreme-contrarian overrides:
+The raw `regime` recorded on the screen can trigger extreme-contrarian overrides.
+(The triggers deliberately read the raw regime, not `regime_smile` — the smile is
+already sign-flipped at extremes and capped at |1.2|, so triggering on it would be
+both unreachable and inverted.)
 
-- `regime_trigger_long_max` blocks new longs.
-- `regime_trigger_short_min` blocks new shorts.
+- `regime_trigger_long_max` blocks new longs when regime is euphoric.
+- `regime_trigger_short_min` blocks new shorts when regime is panicked.
 - `regime_force_exit_threshold` forces a full `EXIT` when the regime extreme moves
   far enough against an open position.
 
@@ -397,16 +406,16 @@ dollars, stop price, and projected heat after the trade.
 | Parameter | Scope | Default | Description |
 | --- | --- | --- | --- |
 | `account_capital` | sizing | `100000` | Total investable account base. |
-| `max_heat_pct` | sizing | `15` | Max total open risk across the whole book as a percent of `account_capital`. |
-| `per_trade_max_risk_pct` | sizing | `5` | Max risk for one trade as a percent of `account_capital`, before conviction scaling. |
+| `max_heat_pct` | sizing | `10` | Max total open risk across the whole book as a percent of `account_capital`. |
+| `per_trade_max_risk_pct` | sizing | `2.5` | Max risk for one trade as a percent of `account_capital`, before conviction scaling. |
 | `per_asset_max_notional_pct` | sizing | `20` | Hard per-asset notional cap as a percent of `account_capital`. |
 | `starter_size_fraction` | sizing | `0.5` | Multiplier applied to risk and notional when the trend gate returns `starter`. |
 | `stop_atr_multiple` | sizing | `2` | Initial stop distance = `entry ± N × ATR`. |
-| `trailing_atr_multiple` | sizing | `2` | Trailing stop distance in the runner / late-trend phase. |
+| `trailing_atr_multiple` | sizing | `3` | Trailing stop distance in the runner / late-trend phase. |
 | `breakeven_trigger_r` | sizing | `1` | Unrealized R at which the oldest unit's stop moves to breakeven. |
 | `partial_trigger_r` | sizing | `1.5` | Unrealized R at which a partial exit is recommended. |
 | `partial_exit_fraction` | sizing | `0.5` | Fraction of the newest unit trimmed at the partial target. |
-| `max_time_stop_days` | sizing | `42` | Max calendar days a position can remain open without reaching its target. |
+| `max_time_stop_days` | sizing | `42` | Max calendar days a position that never worked can stay open. Only applies while fully at risk: a unit at breakeven or a trade past `breakeven_trigger_r` is exempt. |
 
 Formulas used:
 
@@ -431,7 +440,7 @@ risk dollars and the resulting notional. A `late_trend` result is treated as
 3. **+1.5R** — partial exit on the newest unit opens the add window.
 4. **Runner** — trailing stop at `trailing_atr_multiple × ATR`; never widened.
 5. **Late trend** — same trailing distance, but labeled as a tighten.
-6. **Time stop** — full exit if the position sits beyond `max_time_stop_days` without reaching target.
+6. **Time stop** — full exit if the position sits beyond `max_time_stop_days` still fully at risk (no unit at breakeven, under +1R).
 7. **Signal decay** — pre-breakeven decays exit immediately; post-breakeven decays require two consecutive run-days of confirmation.
 
 CLI support:
@@ -452,8 +461,8 @@ list` shows the global layer and the resolved result; `janus cluster show` does 
 for a cluster. An asset with no cluster resolves against `global_param` and the defaults.
 
 Defaults (`domain/params.ts` is the authority): `beta_factor 1.0`,
-`screen_threshold 4.0`, `w_catalyst 0.25`, `w_sentiment 0.25`, `w_trend 0.3`,
-`w_regime 0.15`, `w_secular 0.05`, `fear_premium 1.25`, `divergence_boost 0.5`,
+`screen_threshold 4.0`, `w_catalyst 0.15`, `w_sentiment 0.3`, `w_trend 0.3`,
+`w_regime 0.15`, `w_secular 0.1`, `fear_premium 1.25`, `divergence_boost 0.5`,
 `min_history_bars 200`, plus all gate, sizing, and directive-plan parameters
 documented in the **Scoring gates**, **Position sizing**, and **Directive plans**
 sections above.
@@ -472,19 +481,19 @@ each parameter does; the table below is a compact reference.
 | --- | --- | --- | --- |
 | `beta_factor` | screen | `1.0` | Multiplier applied to the raw screen score before the threshold check. |
 | `screen_threshold` | screen | `4.0` | Minimum `screen_score` for an asset to be flagged for the scoring queue. |
-| `w_catalyst` | score | `0.25` | Weight of the momentum/catalyst factor in `direction`. |
-| `w_sentiment` | score | `0.25` | Weight of the contrarian positioning/crowding factor in `direction`. |
+| `w_catalyst` | score | `0.15` | Weight of the momentum/catalyst factor in `direction`. |
+| `w_sentiment` | score | `0.30` | Weight of the contrarian positioning/crowding factor in `direction`. |
 | `w_trend` | score | `0.30` | Weight of the trend/flow factor in `direction`. |
 | `w_regime` | score | `0.15` | Weight of the session's `regime_smile` in `direction`. |
-| `w_secular` | score | `0.05` | Weight of the longer-horizon thesis factor in `direction`. |
+| `w_secular` | score | `0.10` | Weight of the longer-horizon thesis factor in `direction`. |
 | `fear_premium` | score | `1.25` | Scales the bullish side of the contrarian sentiment fade; >1 makes panic bounces fade harder than greed tops. |
 | `divergence_boost` | score | `0.5` | Widens a contrarian fade when a price/crowding divergence is present. |
 | `min_history_bars` | asset | `200` | Minimum listed bars for an asset to be added to the roster; below this a 200-day MA is impossible. |
 | `max_units` | directive | `3` | Ceiling on how many units can be stacked into one trade via `ADD`. |
 | `conv_hold` | directive | `4` | Conviction floor for staying put; below it the ladder downgrades to `TRIM` or `HOLD`. |
-| `regime_trigger_long_max` | directive | `1.5` | Block new longs and force long exits when `regime_smile` reaches this positive extreme. |
-| `regime_trigger_short_min` | directive | `-1.5` | Block new shorts and force short exits when `regime_smile` reaches this negative extreme. |
-| `regime_force_exit_threshold` | directive | `1.8` | Force a full `EXIT` when `regime_smile` exceeds this against an open position. |
+| `regime_trigger_long_max` | directive | `1.5` | Block new longs when the raw `regime` reaches this euphoric extreme. |
+| `regime_trigger_short_min` | directive | `-1.5` | Block new shorts when the raw `regime` reaches this panicked extreme. |
+| `regime_force_exit_threshold` | directive | `1.8` | Force a full `EXIT` when the raw `regime` exceeds this against an open position. |
 | `actionable_catalyst_min` | directive | `1.5` | Minimum `\|catalyst\|` that counts as an actionable new signal for the persistence rule. |
 | `actionable_direction_delta` | directive | `1.5` | Minimum change in `\|direction\|` from the prior score that counts as actionable. |
 

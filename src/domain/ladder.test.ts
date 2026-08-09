@@ -114,19 +114,45 @@ test("late trend tightens stop", () => {
   assert.equal(plan.action, "tighten");
 });
 
-test("time stop exits entire position", () => {
+test("time stop exits a position still fully at risk", () => {
   const opened = "2026-07-01";
   const today = "2026-08-12"; // 42 days later
   assert.equal(daysBetween(today, opened), 42);
   const plan = deriveLadderPlan({
     ...baseInputs,
-    units: [runnerUnit()],
+    units: [unit({ stop: 90 })],
     coverage: coverage(100, 5),
     openedOn: opened,
     today,
   });
   assert.equal(plan.event, "time_stop");
   assert.equal(plan.action, "time_exit");
+});
+
+test("time stop spares a position that earned breakeven", () => {
+  const opened = "2026-07-01";
+  const today = "2026-08-12"; // 42 days later
+  const plan = deriveLadderPlan({
+    ...baseInputs,
+    units: [runnerUnit()], // stop at entry: breakeven or better
+    coverage: coverage(100, 5),
+    openedOn: opened,
+    today,
+  });
+  assert.notEqual(plan.event, "time_stop");
+});
+
+test("time stop spares a trade past +1R even if the stop lags below entry", () => {
+  const opened = "2026-07-01";
+  const today = "2026-08-12"; // 42 days later
+  const plan = deriveLadderPlan({
+    ...baseInputs,
+    units: [unit({ stop: 90 })],
+    coverage: coverage(115, 5), // +1.5R on initialRisk 100
+    openedOn: opened,
+    today,
+  });
+  assert.equal(plan.event, "breakeven"); // the milestone rung, not the clock
 });
 
 test("pre-breakeven decay exits full position", () => {

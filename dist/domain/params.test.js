@@ -4,11 +4,11 @@ import { DEFAULT_PARAMS, resolveParams } from "./params.js";
 test("defaults match the spec", () => {
     assert.equal(DEFAULT_PARAMS["beta_factor"], 1.0);
     assert.equal(DEFAULT_PARAMS["screen_threshold"], 4.0);
-    assert.equal(DEFAULT_PARAMS["w_catalyst"], 0.25);
-    assert.equal(DEFAULT_PARAMS["w_sentiment"], 0.25);
+    assert.equal(DEFAULT_PARAMS["w_catalyst"], 0.15);
+    assert.equal(DEFAULT_PARAMS["w_sentiment"], 0.3);
     assert.equal(DEFAULT_PARAMS["w_trend"], 0.3);
     assert.equal(DEFAULT_PARAMS["w_regime"], 0.15);
-    assert.equal(DEFAULT_PARAMS["w_secular"], 0.05);
+    assert.equal(DEFAULT_PARAMS["w_secular"], 0.1);
     assert.equal(DEFAULT_PARAMS["fear_premium"], 1.25);
     assert.equal(DEFAULT_PARAMS["divergence_boost"], 0.5);
     assert.equal(DEFAULT_PARAMS["min_history_bars"], 200);
@@ -21,11 +21,11 @@ test("defaults match the spec", () => {
     assert.equal(DEFAULT_PARAMS["late_trend_crowding_extreme"], 85);
     assert.equal(DEFAULT_PARAMS["starter_size_fraction"], 0.5);
     assert.equal(DEFAULT_PARAMS["account_capital"], 100000);
-    assert.equal(DEFAULT_PARAMS["max_heat_pct"], 15);
-    assert.equal(DEFAULT_PARAMS["per_trade_max_risk_pct"], 5);
+    assert.equal(DEFAULT_PARAMS["max_heat_pct"], 10);
+    assert.equal(DEFAULT_PARAMS["per_trade_max_risk_pct"], 2.5);
     assert.equal(DEFAULT_PARAMS["per_asset_max_notional_pct"], 20);
     assert.equal(DEFAULT_PARAMS["stop_atr_multiple"], 2);
-    assert.equal(DEFAULT_PARAMS["trailing_atr_multiple"], 2);
+    assert.equal(DEFAULT_PARAMS["trailing_atr_multiple"], 3);
     assert.equal(DEFAULT_PARAMS["breakeven_trigger_r"], 1);
     assert.equal(DEFAULT_PARAMS["partial_trigger_r"], 1.5);
     assert.equal(DEFAULT_PARAMS["partial_exit_fraction"], 0.5);
@@ -35,6 +35,8 @@ test("defaults match the spec", () => {
     assert.equal(DEFAULT_PARAMS["regime_trigger_short_min"], -1.5);
     assert.equal(DEFAULT_PARAMS["regime_force_exit_threshold"], 1.8);
     assert.equal(DEFAULT_PARAMS["signal_direction_initiate"], 0.9);
+    assert.equal(DEFAULT_PARAMS["signal_conviction_initiate"], 5);
+    assert.equal(DEFAULT_PARAMS["signal_conviction_add"], 6);
     assert.equal(DEFAULT_PARAMS["actionable_catalyst_min"], 1.5);
     assert.equal(DEFAULT_PARAMS["actionable_direction_delta"], 1.5);
 });
@@ -52,4 +54,9 @@ test("resolveParams does not mutate its inputs", () => {
     const cluster = { w_catalyst: 2 };
     resolveParams(cluster, {});
     assert.deepEqual(cluster, { w_catalyst: 2 });
+});
+test("account-scope params cannot be overridden per cluster", () => {
+    const r = resolveParams({ max_heat_pct: 99, w_catalyst: 2 }, { max_heat_pct: 12 });
+    assert.equal(r["max_heat_pct"], 12, "cluster rung stripped, global wins");
+    assert.equal(r["w_catalyst"], 2, "other cluster params still apply");
 });

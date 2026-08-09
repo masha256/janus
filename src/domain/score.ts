@@ -323,7 +323,9 @@ function derivePlan(
 ): { plan: ScorePlan; sizingPlan?: ScorePlan["sizing_plan"] } {
   const side: "long" | "short" | null = direction > 0 ? "long" : direction < 0 ? "short" : null;
   const absDirection = Math.abs(direction);
-  const regimeSmile = requireNum(context.screen!.results, "regime_smile", -2, 2);
+  // Raw regime for the extreme-contrarian triggers; the smile is already
+  // sign-flipped at extremes, so triggering on it would be doubly contrarian.
+  const rawRegime = requireNum(context.screen!.results, "regime", -2, 2);
 
   // Evaluate every gate so the plan can report why it was allowed or blocked.
   const { signal, persistence, trend, binary, heat: initialHeat, flipflop } = runGates(
@@ -370,13 +372,13 @@ function derivePlan(
   const heat = heatGate(params, context.current_heat ?? 0, proposedHeat);
 
   // Regime extreme-contrarian trigger.
-  const regimeTrigger = regimeTriggerState(regimeSmile, params);
+  const regimeTrigger = regimeTriggerState(rawRegime, params);
   const regimeBlocksSide = (s: "long" | "short"): boolean =>
     (s === "long" && regimeTrigger === "extreme_bull") ||
     (s === "short" && regimeTrigger === "extreme_bear");
   const regimeForcesExit = (s: "long" | "short"): boolean => {
     const threshold = params["regime_force_exit_threshold"] ?? 1.8;
-    return (s === "long" && regimeSmile >= threshold) || (s === "short" && regimeSmile <= -threshold);
+    return (s === "long" && rawRegime >= threshold) || (s === "short" && rawRegime <= -threshold);
   };
 
   const convHold = params["conv_hold"] ?? 4;

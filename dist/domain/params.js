@@ -15,20 +15,25 @@
 export const DEFAULT_PARAMS = {
     beta_factor: 1.0,
     screen_threshold: 4.0,
-    w_catalyst: 0.25,
-    w_sentiment: 0.25,
+    // Contrarian lean: sentiment is the heaviest factor. Catalyst is deliberately
+    // light — with a 10:00 ET news cutoff the system is structurally late to news.
+    w_catalyst: 0.15,
+    w_sentiment: 0.3,
     w_trend: 0.3,
     w_regime: 0.15,
-    w_secular: 0.05,
+    w_secular: 0.1,
     fear_premium: 1.25,
     divergence_boost: 0.5,
     min_history_bars: 200,
     max_units: 3,
-    // signalGate — direction and conviction thresholds.
+    // signalGate — direction and conviction thresholds. Direction is the
+    // selectivity lever; conviction is largely a function of |direction| already,
+    // so its floor sits one notch below what a clean all-factors-aligned day
+    // produces (~6) rather than exactly at it.
     signal_direction_initiate: 0.9,
-    signal_conviction_initiate: 6,
+    signal_conviction_initiate: 5,
     signal_direction_add: 1.0,
-    signal_conviction_add: 7,
+    signal_conviction_add: 6,
     signal_direction_exit: 1.0,
     // persistenceGate — how many run-days the signalGate must have passed.
     signal_persist_days: 2,
@@ -52,20 +57,24 @@ export const DEFAULT_PARAMS = {
     flipflop_cooldown_days: 5,
     flipflop_opposite_direction_min: 0.6,
     flipflop_opposite_persist_days: 3,
-    // heatGate — account-level risk heat and per-position sizing caps.
+    // heatGate — account-level risk heat and per-position sizing caps. The book
+    // runs a few highly correlated clusters, so total heat is effectively one
+    // position: keep it and the per-trade slice conservative.
     account_capital: 100000,
-    max_heat_pct: 15,
-    per_trade_max_risk_pct: 5,
+    max_heat_pct: 10,
+    per_trade_max_risk_pct: 2.5,
     per_asset_max_notional_pct: 20,
     // Position sizing.
     // starter_size_fraction scales risk/notional when the trend gate returns starter.
     starter_size_fraction: 0.5,
-    // stop-ladder defaults.
+    // stop-ladder defaults. The initial stop stays tight (2×ATR) but the runner
+    // trail is wider (3×ATR): a weeks-to-months hold must survive normal
+    // consolidations that a days-horizon trail would hand back.
     stop_atr_multiple: 2,
     breakeven_trigger_r: 1,
     partial_trigger_r: 1.5,
     partial_exit_fraction: 0.5,
-    trailing_atr_multiple: 2,
+    trailing_atr_multiple: 3,
     max_time_stop_days: 42,
     // directive ladder — regime triggers and persistence actionability.
     conv_hold: 4,
@@ -75,6 +84,19 @@ export const DEFAULT_PARAMS = {
     actionable_catalyst_min: 1.5,
     actionable_direction_delta: 1.5,
 };
+/**
+ * Account-scope parameters the cluster rung must never override. heatGate
+ * measures heat across the whole book, so a per-cluster ceiling would make the
+ * same book pass or fail depending on which cluster's asset is being scored.
+ * `cluster set-param` refuses these keys; the strip in resolveParams covers
+ * rows written before that guard existed.
+ */
+export const GLOBAL_ONLY_PARAMS = new Set([
+    "account_capital",
+    "max_heat_pct",
+    "per_trade_max_risk_pct",
+]);
 export function resolveParams(cluster, global) {
-    return { ...DEFAULT_PARAMS, ...global, ...cluster };
+    const clusterSafe = Object.fromEntries(Object.entries(cluster).filter(([k]) => !GLOBAL_ONLY_PARAMS.has(k)));
+    return { ...DEFAULT_PARAMS, ...global, ...clusterSafe };
 }

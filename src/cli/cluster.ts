@@ -6,7 +6,7 @@ import {
 import { listAssets } from "../db/repo/asset.ts";
 import { recordClusterRead, listClusterReads, getMacro } from "../db/repo/phase.ts";
 import { resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
-import { resolveParams } from "../domain/params.ts";
+import { GLOBAL_ONLY_PARAMS, resolveParams } from "../domain/params.ts";
 import { deriveClusterRead } from "../domain/read.ts";
 import { assertPhaseOrder, nowIso } from "../domain/session.ts";
 import { finite, metricPairs, readText, required, unknownVerb } from "./args.ts";
@@ -107,7 +107,14 @@ function setParam(
 ): Promise<unknown> {
   return withDb((db) => {
     const cluster = requireClusterByKey(db, required(key, "key"));
-    setClusterParam(db, cluster.id, required(param, "param"), finite(value, "value"));
+    const name = required(param, "param");
+    if (GLOBAL_ONLY_PARAMS.has(name)) {
+      throw new JanusError(
+        "VALIDATION",
+        `${name} is account-scope and cannot be set per cluster; use \`janus param set\``,
+      );
+    }
+    setClusterParam(db, cluster.id, name, finite(value, "value"));
     return { cluster: cluster.key, params: getClusterParams(db, cluster.id) };
   });
 }
