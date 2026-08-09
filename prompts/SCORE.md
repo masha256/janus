@@ -189,7 +189,11 @@ the same numbers. Derive the band from `funding_ref`; `funding_rate` is the carr
 actually paid on the venue, and a large gap between the two means the local crowd
 is offside versus the global one — note it in the rationale.
 
-| `funding_ref` (per interval, as stored) | Anchor band |
+Stored rates are a **fraction per 8 hours** for every venue (Lighter converts
+hourly venues to the 8h equivalent before serving them): `0.0001` = 0.01%/8h
+≈ 11% annualized, the standard neutral baseline.
+
+| `funding_ref` (fraction per 8h, as stored) | Anchor band |
 | --- | --- |
 | ≤ −0.0003, or negative on a normally long-biased asset | 10–30 |
 | −0.0003 to −0.00005 | 30–45 |
