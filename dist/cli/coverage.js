@@ -2,7 +2,7 @@ import { Command } from "commander";
 import { ensureSession, resolveSession, readSessionDate, stampPhase } from "../db/repo/session.js";
 import { eligibleAssets, requireAssetBySymbol, requireSymbols } from "../db/repo/asset.js";
 import { upsertCoverage, listCoverage } from "../db/repo/coverage.js";
-import { backfillInputs, computeCoverage } from "../domain/coverage.js";
+import { backfillInputs, computeCoverage, deriveFundingPair } from "../domain/coverage.js";
 import { createLighterClient } from "../lighter/client.js";
 import { assertPhaseOrder, nowIso, todayNY } from "../domain/session.js";
 import { csv, finite, required, unknownVerb } from "./args.js";
@@ -79,6 +79,7 @@ function set(symbol, opts) {
             px_vs_sma50: optional(opts.pxVsSma50, "px-vs-sma50"),
             px_vs_sma200: optional(opts.pxVsSma200, "px-vs-sma200"),
             cross_50_200: null, cross_50_200_age: null, cross_px_50: null, cross_px_50_age: null,
+            funding_rate: null, funding_ref: null,
             bars_available: 0, fetched_at: now,
         };
         upsertCoverage(db, date, [{ asset_id: asset.id, values }]);
@@ -100,8 +101,21 @@ function run(opts) {
         const client = createLighterClient(process.env["JANUS_LIGHTER_URL"]);
         // A past session date is a backfill: the live snapshot describes today, not
         // that day, so reconstruct both inputs from the bars instead of stamping
-        // today's prices under an old date.
+        // today's prices under an old date. Funding has no history to reconstruct,
+        // so a backfill leaves it null.
         const backfill = session.session_date < todayNY();
+        // One call covers every market. Funding is enrichment for the crowding
+        // factor, not core coverage, so a failed fetch degrades to nulls rather
+        // than failing the run.
+        let fundingRows = [];
+        if (!backfill) {
+            try {
+                fundingRows = await client.fetchFundingRates();
+            }
+            catch {
+                fundingRows = [];
+            }
+        }
         const rows = [];
         const skipped = [];
         for (const asset of targets) {
@@ -113,7 +127,10 @@ function run(opts) {
                 const { bars, snapshot } = backfill
                     ? backfillInputs(allBars, session.session_date)
                     : { bars: allBars, snapshot: liveSnapshot };
-                rows.push({ asset_id: asset.id, values: computeCoverage(bars, snapshot, now) });
+                rows.push({
+                    asset_id: asset.id,
+                    values: computeCoverage(bars, snapshot, now, deriveFundingPair(fundingRows, asset.market_id)),
+                });
             }
             catch (e) {
                 if (e instanceof JanusError && e.code === "INSUFFICIENT_HISTORY") {

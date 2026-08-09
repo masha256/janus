@@ -108,7 +108,9 @@ Screening is asset-specific. Consider:
 - **Momentum / volume** from the coverage snapshot, which is the session's
   authoritative price source. Prefer it over any figure you look up yourself; a
   re-run must not produce a different screen.
-- **Funding, open interest, social volume** for crypto/perp assets.
+- **Funding, open interest, social volume** for crypto/perp assets. The coverage
+  row already carries `funding_rate` (Lighter) and `funding_ref` (median of
+  external reference venues) — prefer those over rates you look up yourself.
 - **Idiosyncratic catalysts** (earnings, product news, regulatory event, token
   unlock, governance vote, exchange listing/delisting).
 - **Cluster context**: read the cluster description (`janus cluster show

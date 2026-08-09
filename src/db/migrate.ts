@@ -267,6 +267,13 @@ ALTER TABLE trade DROP COLUMN add_window_open;
 ALTER TABLE trade_unit DROP COLUMN breakeven_moved_at;
 ALTER TABLE trade_unit DROP COLUMN time_stop_date;
 `,
+  // Funding capture for the crowding factor: Lighter's own rate and the median
+  // of the external reference venues, both from the one-call /funding-rates
+  // endpoint. Null on backfilled or hand-written rows.
+  `
+ALTER TABLE coverage ADD COLUMN funding_rate REAL;
+ALTER TABLE coverage ADD COLUMN funding_ref REAL;
+`,
 ];
 
 export function migrate(db: DatabaseSync): number {

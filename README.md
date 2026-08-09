@@ -179,7 +179,11 @@ the reads.
 3. **`coverage`** — the only phase that touches the network, and the only one with no
    prerequisites. Fetches daily candles and a
    snapshot for every eligible asset (active roster entries on live markets, plus
-   anything holding an open trade) and derives moving averages, ATR, and cross state. A
+   anything holding an open trade) and derives moving averages, ATR, and cross state.
+   It also captures funding per asset from one roster-wide call: `funding_rate`
+   (Lighter's own) and `funding_ref` (median across the external reference venues),
+   which anchor the scoring phase's crowding read. Both are null on backfills —
+   funding has no history to reconstruct. A
    full run (no `--asset`) completes the phase; assets with too little history are
    reported in `skipped` and do not block it. An `--asset`-scoped run never completes the
    phase.

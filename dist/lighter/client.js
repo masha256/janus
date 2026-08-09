@@ -48,6 +48,17 @@ export function parseSnapshot(json) {
         open_interest: toNum(d["open_interest"]),
     };
 }
+export function parseFundingRates(json) {
+    return arrayAt(json, "funding_rates").map((raw) => {
+        const r = raw;
+        return {
+            market_id: required(r["market_id"], "market_id"),
+            exchange: String(r["exchange"]),
+            symbol: String(r["symbol"]),
+            rate: toNum(r["rate"]),
+        };
+    });
+}
 export function parseBars(json) {
     const raw = json?.["c"];
     if (!Array.isArray(raw))
@@ -89,6 +100,9 @@ export function createLighterClient(baseUrl = LIGHTER_BASE_URL, fetchImpl = fetc
         },
         async fetchSnapshot(marketId) {
             return parseSnapshot(await get("orderBookDetails", { market_id: String(marketId) }));
+        },
+        async fetchFundingRates() {
+            return parseFundingRates(await get("funding-rates"));
         },
         async fetchDailyBars(marketId, lookbackDays = 400) {
             const end = Date.now();

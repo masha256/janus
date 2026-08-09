@@ -14,6 +14,7 @@ const values = (close) => ({
     sma20: null, sma50: null, sma200: null, ema12: null, ema26: null, atr14: null,
     px_vs_sma20: null, px_vs_sma50: null, px_vs_sma200: null,
     cross_50_200: null, cross_50_200_age: null, cross_px_50: null, cross_px_50_age: null,
+    funding_rate: null, funding_ref: null,
     bars_available: 3, fetched_at: NOW,
 });
 function fresh() {

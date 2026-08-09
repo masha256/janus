@@ -1,6 +1,6 @@
 import { JanusError } from "../output.ts";
 import type { Bar } from "../types.ts";
-import type { Snapshot } from "../lighter/client.ts";
+import type { FundingRateRow, Snapshot } from "../lighter/client.ts";
 import { smaSeries, emaSeries } from "../indicators/ma.ts";
 import { atr } from "../indicators/atr.ts";
 import { maCross, priceVsMa } from "../indicators/cross.ts";
@@ -14,8 +14,35 @@ export type CoverageValues = {
   px_vs_sma20: number | null; px_vs_sma50: number | null; px_vs_sma200: number | null;
   cross_50_200: "golden" | "death" | null; cross_50_200_age: number | null;
   cross_px_50: "above" | "below" | null; cross_px_50_age: number | null;
+  funding_rate: number | null; funding_ref: number | null;
   bars_available: number; fetched_at: string;
 };
+
+export type FundingPair = { funding_rate: number | null; funding_ref: number | null };
+
+const NO_FUNDING: FundingPair = { funding_rate: null, funding_ref: null };
+
+/**
+ * Lighter's own funding rate plus the median rate across the external
+ * reference venues (`/funding-rates` carries binance/bybit/hyperliquid rows
+ * for the same market). The median of the deep venues is the crowding
+ * anchor; Lighter's own rate is the carry actually paid on the position and,
+ * against the reference, a local-crowding divergence signal.
+ */
+export function deriveFundingPair(rows: FundingRateRow[], marketId: number): FundingPair {
+  const forMarket = rows.filter((r) => r.market_id === marketId && r.rate !== null);
+  const own = forMarket.find((r) => r.exchange === "lighter")?.rate ?? null;
+  const ext = forMarket
+    .filter((r) => r.exchange !== "lighter")
+    .map((r) => r.rate as number)
+    .sort((a, b) => a - b);
+  const mid = ext.length === 0
+    ? null
+    : ext.length % 2 === 1
+      ? ext[(ext.length - 1) / 2]!
+      : (ext[ext.length / 2 - 1]! + ext[ext.length / 2]!) / 2;
+  return { funding_rate: own, funding_ref: mid };
+}
 
 const lastOf = (series: (number | null)[]): number | null => series.at(-1) ?? null;
 
@@ -23,7 +50,13 @@ const lastOf = (series: (number | null)[]): number | null => series.at(-1) ?? nu
 const distance = (close: number, ma: number | null): number | null =>
   ma === null || ma === 0 ? null : ((close - ma) / ma) * 100;
 
-export function computeCoverage(bars: Bar[], snapshot: Snapshot, fetchedAt: string): CoverageValues {
+/** `funding` defaults to nulls: backfills and hand-written rows have no funding history to reconstruct. */
+export function computeCoverage(
+  bars: Bar[],
+  snapshot: Snapshot,
+  fetchedAt: string,
+  funding: FundingPair = NO_FUNDING,
+): CoverageValues {
   const latest = bars.at(-1);
   if (latest === undefined) {
     throw new JanusError("INSUFFICIENT_HISTORY", "no daily bars returned for this market");
@@ -57,6 +90,8 @@ export function computeCoverage(bars: Bar[], snapshot: Snapshot, fetchedAt: stri
     cross_50_200_age: cross.age,
     cross_px_50: side.state,
     cross_px_50_age: side.age,
+    funding_rate: funding.funding_rate,
+    funding_ref: funding.funding_ref,
     bars_available: bars.length,
     fetched_at: fetchedAt,
   };

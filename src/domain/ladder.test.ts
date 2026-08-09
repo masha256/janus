@@ -19,6 +19,7 @@ const coverage = (mark: number, atr: number): CoverageValues => ({
   cross_50_200: null, cross_50_200_age: null,
   cross_px_50: null, cross_px_50_age: null,
   atr14: atr,
+  funding_rate: null, funding_ref: null,
   bars_available: 250,
   fetched_at: "",
 });

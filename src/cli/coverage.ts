@@ -2,8 +2,8 @@ import { Command } from "commander";
 import { ensureSession, resolveSession, readSessionDate, stampPhase } from "../db/repo/session.ts";
 import { eligibleAssets, requireAssetBySymbol, requireSymbols } from "../db/repo/asset.ts";
 import { upsertCoverage, listCoverage } from "../db/repo/coverage.ts";
-import { backfillInputs, computeCoverage, type CoverageValues } from "../domain/coverage.ts";
-import { createLighterClient } from "../lighter/client.ts";
+import { backfillInputs, computeCoverage, deriveFundingPair, type CoverageValues } from "../domain/coverage.ts";
+import { createLighterClient, type FundingRateRow } from "../lighter/client.ts";
 import { assertPhaseOrder, nowIso, todayNY } from "../domain/session.ts";
 import { csv, finite, required, unknownVerb } from "./args.ts";
 import { type Emit, handler, withDb } from "./command.ts";
@@ -98,6 +98,7 @@ function set(symbol: string | undefined, opts: SetOpts): Promise<unknown> {
       px_vs_sma50: optional(opts.pxVsSma50, "px-vs-sma50"),
       px_vs_sma200: optional(opts.pxVsSma200, "px-vs-sma200"),
       cross_50_200: null, cross_50_200_age: null, cross_px_50: null, cross_px_50_age: null,
+      funding_rate: null, funding_ref: null,
       bars_available: 0, fetched_at: now,
     };
     upsertCoverage(db, date, [{ asset_id: asset.id, values }]);
@@ -122,8 +123,21 @@ function run(opts: RunOpts): Promise<unknown> {
 
     // A past session date is a backfill: the live snapshot describes today, not
     // that day, so reconstruct both inputs from the bars instead of stamping
-    // today's prices under an old date.
+    // today's prices under an old date. Funding has no history to reconstruct,
+    // so a backfill leaves it null.
     const backfill = session.session_date < todayNY();
+
+    // One call covers every market. Funding is enrichment for the crowding
+    // factor, not core coverage, so a failed fetch degrades to nulls rather
+    // than failing the run.
+    let fundingRows: FundingRateRow[] = [];
+    if (!backfill) {
+      try {
+        fundingRows = await client.fetchFundingRates();
+      } catch {
+        fundingRows = [];
+      }
+    }
 
     const rows: { asset_id: number; values: ReturnType<typeof computeCoverage> }[] = [];
     const skipped: { symbol: string; reason: string }[] = [];
@@ -136,7 +150,10 @@ function run(opts: RunOpts): Promise<unknown> {
         const { bars, snapshot } = backfill
           ? backfillInputs(allBars, session.session_date)
           : { bars: allBars, snapshot: liveSnapshot! };
-        rows.push({ asset_id: asset.id, values: computeCoverage(bars, snapshot, now) });
+        rows.push({
+          asset_id: asset.id,
+          values: computeCoverage(bars, snapshot, now, deriveFundingPair(fundingRows, asset.market_id)),
+        });
       } catch (e) {
         if (e instanceof JanusError && e.code === "INSUFFICIENT_HISTORY") {
           skipped.push({ symbol: asset.symbol, reason: e.message });

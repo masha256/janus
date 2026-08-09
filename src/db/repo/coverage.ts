@@ -7,6 +7,7 @@ const COLUMNS = [
   "sma20", "sma50", "sma200", "ema12", "ema26", "atr14",
   "px_vs_sma20", "px_vs_sma50", "px_vs_sma200",
   "cross_50_200", "cross_50_200_age", "cross_px_50", "cross_px_50_age",
+  "funding_rate", "funding_ref",
   "bars_available", "fetched_at",
 ] as const;
 

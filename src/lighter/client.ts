@@ -23,10 +23,20 @@ export type Snapshot = {
   open_interest: number | null;
 };
 
+/** One venue's current funding rate for one market, as `/funding-rates` reports it. */
+export type FundingRateRow = {
+  market_id: number;
+  exchange: string;
+  symbol: string;
+  rate: number | null;
+};
+
 export type LighterApi = {
   fetchMarkets(): Promise<MarketInfo[]>;
   fetchSnapshot(marketId: number): Promise<Snapshot>;
   fetchDailyBars(marketId: number, lookbackDays?: number): Promise<Bar[]>;
+  /** Current funding for every market on the exchange, including external reference venues. */
+  fetchFundingRates(): Promise<FundingRateRow[]>;
 };
 
 /** Lighter returns some numerics as strings; anything unparseable becomes null. */
@@ -78,6 +88,18 @@ export function parseSnapshot(json: unknown): Snapshot {
   };
 }
 
+export function parseFundingRates(json: unknown): FundingRateRow[] {
+  return arrayAt(json, "funding_rates").map((raw) => {
+    const r = raw as Record<string, unknown>;
+    return {
+      market_id: required(r["market_id"], "market_id"),
+      exchange: String(r["exchange"]),
+      symbol: String(r["symbol"]),
+      rate: toNum(r["rate"]),
+    };
+  });
+}
+
 export function parseBars(json: unknown): Bar[] {
   const raw = (json as Record<string, unknown>)?.["c"];
   if (!Array.isArray(raw)) throw new JanusError("UPSTREAM", "expected candles array `c` in response");
@@ -120,6 +142,9 @@ export function createLighterClient(
     },
     async fetchSnapshot(marketId) {
       return parseSnapshot(await get("orderBookDetails", { market_id: String(marketId) }));
+    },
+    async fetchFundingRates() {
+      return parseFundingRates(await get("funding-rates"));
     },
     async fetchDailyBars(marketId, lookbackDays = 400) {
       const end = Date.now();

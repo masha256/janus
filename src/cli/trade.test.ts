@@ -252,6 +252,7 @@ test("trade show enriches open units with mark-price progress", async () => {
           sma20: 120, sma50: 115, sma200: 110, ema12: 125, ema26: 122, atr14: 5,
           px_vs_sma20: 8, px_vs_sma50: 13, px_vs_sma200: 18,
           cross_50_200: "golden", cross_50_200_age: 10, cross_px_50: "above", cross_px_50_age: 10,
+          funding_rate: null, funding_ref: null,
           bars_available: 250, fetched_at: "2026-07-31T12:00:00Z",
         },
       }]);
@@ -291,6 +292,7 @@ test("trade show warns when coverage is older than today", async () => {
           sma20: 120, sma50: 115, sma200: 110, ema12: 125, ema26: 122, atr14: 5,
           px_vs_sma20: 8, px_vs_sma50: 13, px_vs_sma200: 18,
           cross_50_200: "golden", cross_50_200_age: 10, cross_px_50: "above", cross_px_50_age: 10,
+          funding_rate: null, funding_ref: null,
           bars_available: 250, fetched_at: "2026-07-30T12:00:00Z",
         },
       }]);
@@ -386,6 +388,7 @@ test("--size auto and --stop auto use the score plan sizing", async () => {
           sma20: 120, sma50: 115, sma200: 110, ema12: 125, ema26: 122, atr14: 5,
           px_vs_sma20: 8, px_vs_sma50: 13, px_vs_sma200: 18,
           cross_50_200: "golden", cross_50_200_age: 10, cross_px_50: "above", cross_px_50_age: 10,
+          funding_rate: null, funding_ref: null,
           bars_available: 250, fetched_at: NOW,
         },
       }]);
@@ -422,6 +425,7 @@ test("--size auto and --stop auto use the score plan sizing", async () => {
         sma20: 120, sma50: 115, sma200: 110, ema12: 125, ema26: 122, atr14: 5,
         px_vs_sma20: 8, px_vs_sma50: 13, px_vs_sma200: 18,
         cross_50_200: "golden", cross_50_200_age: 10, cross_px_50: "above", cross_px_50_age: 10,
+        funding_rate: null, funding_ref: null,
         bars_available: 250, fetched_at: NOW,
       };
       const result = deriveScore(
@@ -495,6 +499,7 @@ test("--size auto and --stop auto use the score plan sizing", async () => {
           sma20: 125, sma50: 118, sma200: 112, ema12: 130, ema26: 126, atr14: 5,
           px_vs_sma20: 12, px_vs_sma50: 18, px_vs_sma200: 25,
           cross_50_200: "golden", cross_50_200_age: 11, cross_px_50: "above", cross_px_50_age: 11,
+          funding_rate: null, funding_ref: null,
           bars_available: 250, fetched_at: NOW,
         },
       }]);
@@ -532,6 +537,7 @@ test("set-stop --auto holds on a pullback instead of rejecting itself", async ()
           sma20: 118, sma50: 112, sma200: 105, ema12: 121, ema26: 118, atr14: 8,
           px_vs_sma20: 3, px_vs_sma50: 9, px_vs_sma200: 16,
           cross_50_200: "golden", cross_50_200_age: 20, cross_px_50: "above", cross_px_50_age: 20,
+          funding_rate: null, funding_ref: null,
           bars_available: 250, fetched_at: NOW,
         },
       }]);

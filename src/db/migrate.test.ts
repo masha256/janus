@@ -58,7 +58,7 @@ test("foreign keys cascade from session to its phase rows", () => {
 test("migration 1 drops the dead ladder columns", () => {
   const db = openDb(":memory:");
   const version = migrate(db);
-  assert.equal(version, 2, "schema should be at version 2");
+  assert.equal(version, MIGRATIONS.length, "schema should be at the latest version");
 
   const cols = (table: string) =>
     db.prepare(`SELECT name FROM pragma_table_info(?)`).all(table)
@@ -92,7 +92,7 @@ test("migration 1 preserves the rows in an existing v1 database", () => {
       VALUES (1,1,'2026-07-31',100,1000,10,90,'open',1);
   `);
 
-  assert.equal(migrate(db), 2, "a v1 database migrates to 2");
+  assert.equal(migrate(db), MIGRATIONS.length, "a v1 database migrates to the latest version");
 
   const row = db
     .prepare("SELECT notional, entry_price, partial_exited FROM trade_unit WHERE trade_id=1 AND seq=1")

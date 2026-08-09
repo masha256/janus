@@ -303,6 +303,7 @@ function coverage(over: Partial<import("./coverage.ts").CoverageValues> = {}): i
     sma20: 98, sma50: 95, sma200: 90, ema12: 99, ema26: 96, atr14: 5,
     px_vs_sma20: 2, px_vs_sma50: 5, px_vs_sma200: 10,
     cross_50_200: "golden", cross_50_200_age: 10, cross_px_50: "above", cross_px_50_age: 10,
+    funding_rate: null, funding_ref: null,
     bars_available: 250, fetched_at: "2026-07-31T12:00:00Z",
     ...over,
   };

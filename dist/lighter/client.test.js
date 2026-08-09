@@ -56,3 +56,25 @@ test("a non-200 response becomes an UPSTREAM error naming the endpoint", async (
     const client = createLighterClient("https://example.test", fakeFetch);
     await assert.rejects(() => client.fetchMarkets(), (e) => e.code === "UPSTREAM" && /503/.test(e.message));
 });
+test("fetchFundingRates parses the roster-wide funding reply", async () => {
+    const reply = {
+        code: 200,
+        funding_rates: [
+            { market_id: 0, exchange: "lighter", symbol: "ETH", rate: 0.000096 },
+            { market_id: 0, exchange: "binance", symbol: "ETH", rate: "0.0001" },
+            { market_id: 141, exchange: "binance", symbol: "HYUNDAI", rate: null },
+        ],
+    };
+    const fakeFetch = async (input) => {
+        const url = new URL(String(input));
+        assert.equal(url.pathname, "/api/v1/funding-rates");
+        return new Response(JSON.stringify(reply), { status: 200 });
+    };
+    const { createLighterClient } = await import("./client.js");
+    const client = createLighterClient("https://example.test", fakeFetch);
+    const rows = await client.fetchFundingRates();
+    assert.equal(rows.length, 3);
+    assert.deepEqual(rows[0], { market_id: 0, exchange: "lighter", symbol: "ETH", rate: 0.000096 });
+    assert.equal(rows[1].rate, 0.0001, "string numerics are coerced");
+    assert.equal(rows[2].rate, null, "null rate survives as null");
+});

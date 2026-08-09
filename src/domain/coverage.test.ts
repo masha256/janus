@@ -112,3 +112,40 @@ test("a backfilled window still computes indicators off the truncated bars", () 
   assert.equal(values.bars_available, 20);
   assert.ok(values.sma20 !== null, "20 bars is exactly enough for the 20-day");
 });
+
+test("deriveFundingPair splits lighter's rate from the median external rate", async () => {
+  const { deriveFundingPair } = await import("./coverage.ts");
+  const rows = [
+    { market_id: 0, exchange: "lighter", symbol: "ETH", rate: 0.00009 },
+    { market_id: 0, exchange: "binance", symbol: "ETH", rate: 0.0001 },
+    { market_id: 0, exchange: "bybit", symbol: "ETH", rate: 0.00005 },
+    { market_id: 0, exchange: "hyperliquid", symbol: "ETH", rate: 0.0003 },
+    { market_id: 7, exchange: "lighter", symbol: "BTC", rate: 0.0002 },
+  ];
+  const pair = deriveFundingPair(rows, 0);
+  assert.equal(pair.funding_rate, 0.00009);
+  assert.equal(pair.funding_ref, 0.0001, "median of the three external venues");
+});
+
+test("deriveFundingPair handles missing venues and null rates", async () => {
+  const { deriveFundingPair } = await import("./coverage.ts");
+  // Even count of external rows -> mean of the middle two; no lighter row -> null.
+  const even = deriveFundingPair([
+    { market_id: 3, exchange: "binance", symbol: "X", rate: 0.0001 },
+    { market_id: 3, exchange: "bybit", symbol: "X", rate: 0.0003 },
+    { market_id: 3, exchange: "hyperliquid", symbol: "X", rate: null },
+  ], 3);
+  assert.equal(even.funding_rate, null);
+  assert.ok(Math.abs(even.funding_ref! - 0.0002) < 1e-12, `got ${even.funding_ref}`);
+  // Unknown market -> both null.
+  assert.deepEqual(deriveFundingPair([], 9), { funding_rate: null, funding_ref: null });
+});
+
+test("computeCoverage stores the funding pair and defaults it to nulls", () => {
+  const withFunding = computeCoverage(rising(5), snapshot, FETCHED, { funding_rate: 0.0001, funding_ref: 0.0002 });
+  assert.equal(withFunding.funding_rate, 0.0001);
+  assert.equal(withFunding.funding_ref, 0.0002);
+  const without = computeCoverage(rising(5), snapshot, FETCHED);
+  assert.equal(without.funding_rate, null);
+  assert.equal(without.funding_ref, null);
+});

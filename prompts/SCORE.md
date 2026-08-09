@@ -167,7 +167,9 @@ structural adjustments, not to override the top-down regime.
 ### Crowding (1..100)
 
 Aggregate positioning and social temperature. Janus derives **sentiment** from
-crowding internally; you supply only the raw crowding number.
+crowding internally; you supply only the raw crowding number. Crowding is a
+bull-bear temperature: a crowd that is heavily **short/fearful reads LOW**, a
+crowd heavily **long/greedy reads HIGH**.
 
 | Range | Condition |
 | --- | --- |
@@ -179,9 +181,39 @@ crowding internally; you supply only the raw crowding number.
 | 85–95 | Euphoria, leverage crowded |
 | 96–100 | Bubble, maximum extension |
 
-Inputs to weigh: funding rates, open interest, social volume/sentiment, retail
-positioning proxies, premium/discount to fair value, option skew if available.
-Missing data → treat as **50 (neutral)** and mention in rationale.
+**Anchor on the coverage row first.** Every coverage row carries `funding_rate`
+(Lighter's own rate) and `funding_ref` (the median funding across the external
+reference venues — Binance/Bybit/Hyperliquid — for the same market). These are
+snapshotted at coverage time, so they respect the session anchor and re-runs see
+the same numbers. Derive the band from `funding_ref`; `funding_rate` is the carry
+actually paid on the venue, and a large gap between the two means the local crowd
+is offside versus the global one — note it in the rationale.
+
+| `funding_ref` (per interval, as stored) | Anchor band |
+| --- | --- |
+| ≤ −0.0003, or negative on a normally long-biased asset | 10–30 |
+| −0.0003 to −0.00005 | 30–45 |
+| ≈ +0.0001 (the standard baseline) | 45–60 |
+| +0.0002 to +0.0005 | 60–80 |
+| > +0.0005, or sharply above its recent norm | 80–95+ |
+
+Then move within (or one band beyond) the anchor using:
+
+- **Mark vs index premium** from the coverage row (`mark_price` vs `index_price`):
+  persistent premium = crowded longs, discount = crowded shorts.
+- **Open interest trend**: compare `open_interest` against prior coverage rows
+  (`janus coverage list --date <prior day>`). OI rising with price = longs
+  piling in; OI rising as price falls = shorts piling in.
+- **Recent funding trend**: the same prior coverage rows carry `funding_rate` /
+  `funding_ref` history once the system has run a few sessions.
+- **Social volume/sentiment, retail positioning proxies, option skew** when
+  available — refinement only, never the anchor.
+
+When `funding_ref` is null (no external venue lists the market), fall back to
+`funding_rate` alone at reduced confidence; equity perp funding is often thin or
+pinned at zero, so for the equity clusters lean on premium + OI trend instead.
+Only when the coverage row itself has no funding and no usable premium/OI should
+crowding fall back to **50 (neutral)** — and say so in the rationale.
 
 ### Capitulation (0 or 1)
 
