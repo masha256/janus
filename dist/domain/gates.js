@@ -97,7 +97,9 @@ export function trendGate(side, coverage, crowding, params) {
             return "fail";
         if (pxVs50 === null || pxVs50 > t50Short)
             return "starter";
-        const extended = pxVs200 !== null && pxVs200 <= -lateDist && crowding >= lateCrowd;
+        // A crowded short is the fear tail: crowding is a bull-bear temperature,
+        // so "everyone is already bearish" reads low, mirroring the greed extreme.
+        const extended = pxVs200 !== null && pxVs200 <= -lateDist && crowding <= 100 - lateCrowd;
         return extended ? "late_trend" : "pass";
     }
     return "fail";

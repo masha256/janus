@@ -302,7 +302,7 @@ HOLD/EXIT/TRIM directives still carry the gate status for observability.
 | `trend_sma20_threshold_short` | trendGate | `0` | Short `px_vs_sma20` must be < threshold to be starter or pass. |
 | `trend_sma50_threshold_short` | trendGate | `0` | Short `px_vs_sma50` must be <= threshold to be pass (above is starter). |
 | `late_trend_ma_distance` | trendGate | `20` | Distance beyond the 200-day MA that, with extreme crowding, marks a move as `late_trend`. |
-| `late_trend_crowding_extreme` | trendGate | `85` | Crowding level that, with a stretched 200-day MA distance, marks a move as `late_trend`. |
+| `late_trend_crowding_extreme` | trendGate | `85` | Crowding extreme that, with a stretched 200-day MA distance, marks a move as `late_trend`. Greed tail (`>=` value) for longs, fear tail (`<= 100 − value`) for shorts — a crowded short means the crowd is already bearish. |
 | `binary_cooldown_days` | binaryGate | `14` | Days ahead of a recorded binary event during which entry is blocked; entry reopens once the event has passed. |
 | `flipflop_cooldown_days` | flipflopGate | `5` | Days after an exit during which opposite-side re-entry faces extra scrutiny. |
 | `flipflop_opposite_direction_min` | flipflopGate | `0.6` | Minimum `\|direction\|` for opposite-side re-entry during the flipflop cooldown. |

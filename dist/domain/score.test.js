@@ -538,6 +538,18 @@ test("crowding below the extreme leaves an extended trend at pass", () => {
     const got = deriveScore(m(2, 2, 1, 50, false, false), ctxWithPosition({ side: null, units: 0 }, extended()), DEFAULT_PARAMS);
     assert.equal(got.plan.trend_gate, "pass");
 });
+/** Extended downtrend: far enough below the 200-day for the short late-trend check. */
+const extendedDown = () => coverage({ px_vs_sma20: -2, px_vs_sma50: -5, px_vs_sma200: -25 });
+test("short late_trend fires on the fear tail of crowding", () => {
+    // Crowding 10 = panic: the crowd is already bearish, so the short is crowded.
+    const got = deriveScore(m(-2, -2, -1, 10, false, false), ctxWithPosition({ side: null, units: 0 }, extendedDown()), DEFAULT_PARAMS);
+    assert.ok(got.direction < 0, `needs a short side to reach the short branch, got ${got.direction}`);
+    assert.equal(got.plan.trend_gate, "late_trend");
+});
+test("neutral crowding leaves an extended downtrend at pass for shorts", () => {
+    const got = deriveScore(m(-2, -2, -1, 50, false, false), ctxWithPosition({ side: null, units: 0 }, extendedDown()), DEFAULT_PARAMS);
+    assert.equal(got.plan.trend_gate, "pass");
+});
 test("crowding on the screen row cannot drive late_trend", () => {
     // The regression: screen metrics are not a gate input. An extreme crowding
     // reading recorded there must be ignored, leaving the score's own 50.
