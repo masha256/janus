@@ -352,28 +352,29 @@ Queue: N assets (F flagged, T open trades). Directives: X INITIATE, Y ADD, ...
 
 **Macro: <regime>** — <macro summary>
 
-<cluster table>
+<table 1>
 
 ## Open trades
 
-<table 1>
+<table 2>
 
 ## Actions for today
 
-<table 2>
-
-## Other
-
 <table 3>
+
+## Scores
+
+<table 4>
 
 ## Data gaps
 
 - one bullet per declared gap, or "none"
 ```
 
-An asset appears in **table 1** if it holds an open trade, and again in
-**table 2** if today's directive is actionable. That overlap is intended:
-table 1 is the state of the book, table 2 is the work list.
+An asset appears in **table 2** if it holds an open trade, again in **table 3**
+if today's directive is actionable, and again in **table 4** unless it is a
+flat asset with an action. That overlap is intended: table 2 is the state of
+the book, table 3 is the work list, table 4 is today's scoring read.
 
 ### Regime section
 
@@ -383,7 +384,8 @@ on its own. Do not re-reason it and do not adjust it — copy what
 
 - **Macro line** — the macro `metrics.regime` at one decimal, signed
   (e.g. `+1.2`), followed by the recorded `summary` verbatim.
-- **Cluster table** — one row per cluster read, sorted by `regime` descending:
+- **Table 1 — clusters** — one row per cluster read, sorted by `regime`
+  descending:
 
   | Cluster | Regime | Δ vs macro | Summary |
 
@@ -397,7 +399,7 @@ If a phase is missing (no macro or no cluster reads for the date), say so in one
 line rather than inventing a number — but that should not happen, since the
 score phase requires both.
 
-### Table 1 — open trades
+### Table 2 — open trades
 
 Every open trade from `janus trade list --open`, including trades on assets
 that were not flagged today. Sort by absolute `unrealized_r`, descending.
@@ -428,7 +430,7 @@ that were not flagged today. Sort by absolute `unrealized_r`, descending.
 Close the table with a totals line: open risk, realized, unrealized, and the
 book-weighted R.
 
-### Table 2 — actions for today
+### Table 3 — actions for today
 
 Every scored asset whose `directive` is not `HOLD` and not `STAND_ASIDE` —
 `INITIATE`, `ADD`, `TRIM`, and `EXIT` alike, whether or not a trade is already
@@ -438,7 +440,7 @@ descending.
 
 | Asset | Cluster | Directive | Position | Direction | Conviction | Action | Rationale |
 
-- **Asset**, **Cluster** — as in table 1.
+- **Asset**, **Cluster** — as in table 2.
 - **Directive** — verbatim: `INITIATE`, `ADD`, `TRIM`, `EXIT`.
 - **Position** — `position` / `position_state` as stored, e.g. `long:2`; `flat`
   for a new entry.
@@ -469,21 +471,29 @@ If no asset qualifies, keep the header and write the single line
 an omitted section look identical to the operator, and only one of them means
 janus actually ran the ladder.
 
-### Table 3 — other
+### Table 4 — scores
 
-Every remaining scored asset: no open trade, no action. In practice these are
-the `STAND_ASIDE` rows, plus any flagged asset the gates blocked. Sort by
-directive, then `conviction` descending, ties broken by absolute `direction`
-descending.
+Today's scoring read for every asset that carries one: every scored asset with
+an **open position**, plus every remaining scored asset with no open trade and
+no action (in practice the `STAND_ASIDE` rows and any flagged asset the gates
+blocked). This is the only place an open position's current score appears, so
+never drop a position row here because it already showed up in table 2 or 3.
 
-| Asset | Cluster | Directive | Direction | Conviction | Why not | Rationale |
+Sort **open positions first, then the rest**; within each group by `conviction`
+descending, ties broken by absolute `direction` descending.
+
+| Asset | Cluster | Position | Directive | Direction | Conviction | Why not | Rationale |
 
 - **Asset**, **Cluster**, **Direction**, **Conviction**, **Rationale** — as above.
-- **Directive** — verbatim, normally `STAND_ASIDE`.
+- **Position** — `position` / `position_state` as stored, e.g. `long:2`; `flat`
+  when there is no open trade.
+- **Directive** — verbatim: whatever today's directive is, `HOLD` and
+  `STAND_ASIDE` included.
 - **Why not** — the stored `directive_reason`, verbatim, one line. It already
   names the blocking gates where gates are the cause, e.g. `long entry blocked
   by trend, heat gate(s)`, and states the reason directly otherwise, e.g. `no
-  directional edge`. Do not re-derive it from the individual gate fields.
+  directional edge`. Do not re-derive it from the individual gate fields; `—`
+  when the row has none.
 
 ### Rules
 
@@ -492,7 +502,7 @@ descending.
 - Never put a number in the report that did not come out of a janus envelope.
   A missing value is `—`, not an estimate.
 - Omit a section header entirely if that table has no rows. The regime section
-  and Table 2 are never omitted: a quiet day is a result, and a missing header
+  and Table 3 are never omitted: a quiet day is a result, and a missing header
   reads as a forgotten step rather than "nothing to do".
 
 ### Commit the report
