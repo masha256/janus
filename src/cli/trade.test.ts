@@ -308,7 +308,7 @@ test("trade with no verb names the verbs instead of quoting undefined", async ()
     await assert.rejects(
       () => handle(undefined, []),
       (e: Error & { code?: string }) =>
-        e.code === "VALIDATION" && e.message === "trade requires a verb; try: open, add-unit, set-stop, exit, list, show",
+        e.code === "VALIDATION" && e.message === "trade requires a verb; try: open, add-unit, set-stop, exit, edit, list, show",
     );
   });
 });

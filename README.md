@@ -578,6 +578,7 @@ janus trade add-unit <trade_id> --price P --stop S --risk R --notional N
                      [--tag core|runner] [--date D]
 janus trade set-stop <trade_id> --stop S [--unit SEQ]
 janus trade exit <trade_id> --price P [--unit SEQ] [--funding N] [--date D]
+janus trade edit <trade_id> [--unit SEQ] --set KEY=VALUE [--set KEY=VALUE ...]
 janus trade list [--open] [--closed] [--asset SYM[,SYM...]]
 janus trade show <trade_id>
 ```
@@ -643,6 +644,31 @@ Check the open position's plan for today without re-entering factors:
 ```
 janus score show BTC
 ```
+
+Correct a typo after the fact. `--funding` is a cost when negative, so a positive
+value recorded by mistake overstates Net R:
+
+```
+janus trade edit 1 --unit 1 --set funding=-120
+janus trade edit 1 --set thesis="breakout, reclaimed the 50d"
+```
+
+Without `--unit` it edits the trade row; with it, that one unit. The reply names
+every field it touched with its before and after value.
+
+Editable on the trade: `opened_on`, `initial_price`, `initial_stop`,
+`initial_risk`, `thesis`, `origin_session_date`. On a unit: `entry_on`,
+`entry_price`, `notional`, `risk`, `stop`, `exit_on`, `exit_price`, `funding`,
+`tag`, `notes`.
+
+Everything else is refused, and the refusal says why. Identity (`id`, `seq`,
+`asset_id`) is not data. State that a command transitions — `status`,
+`closed_on`, `partial_exited`, `direction` — is refused because the readers
+treat it as an invariant: `positionOf` collapses a side with zero open units,
+`trade_one_open_per_asset` assumes one open trade, and the ladder reads
+`partial_exited` to decide the add window. Hand-editing those manufactures
+states the rest of the code is written to assume impossible. Reverse the command
+that set them instead.
 
 `--class` is one of `crypto`, `equity`, `etf`, `commodity`, `fx`, `index`.
 `--direction` is required — there is no default, because a short logged as a long

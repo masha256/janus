@@ -117,7 +117,13 @@ export function setStop(db: DatabaseSync, tradeId: number, stop: number, seq?: n
   return changed;
 }
 
-/** Omitting seq exits every open unit and closes the trade. */
+/**
+ * Omitting seq exits every open unit and closes the trade.
+ *
+ * `funding` is a total for the exit, not a per-unit figure — the CLI asks for
+ * "funding paid/received over the hold". Writing it unchanged onto every unit
+ * multiplied it by the unit count, because trade-math sums funding across units.
+ */
 export function exitUnits(
   db: DatabaseSync,
   tradeId: number,
@@ -129,7 +135,16 @@ export function exitUnits(
   requireTrade(db, tradeId);
   db.exec("BEGIN");
   try {
-    const fundingValue = funding ?? 0;
+    // ponytail: an even split across the closing units. Funding really accrues
+    // per notional per day, but nothing reads a unit's funding on its own —
+    // only the total — so the split just has to sum back. Weight it by notional
+    // if a per-unit figure ever gets surfaced.
+    const closing = seq === undefined
+      ? (db
+          .prepare("SELECT COUNT(*) AS n FROM trade_unit WHERE trade_id = ? AND status = 'open'")
+          .get(tradeId) as { n: number }).n
+      : 1;
+    const fundingValue = (funding ?? 0) / Math.max(1, closing);
     const result = seq === undefined
       ? db.prepare(
           "UPDATE trade_unit SET status='closed', exit_price=?, exit_on=?, funding=? WHERE trade_id=? AND status='open'",
@@ -256,6 +271,134 @@ export function openTradeForAsset(db: DatabaseSync, assetId: number): OpenTradeS
     initial_risk: row.initial_risk,
     opened_on: row.opened_on,
   };
+}
+
+type FieldKind = "num" | "posnum" | "date" | "text";
+
+/**
+ * Hand-correctable fields: the figures an operator typed in, and nothing else.
+ *
+ * Absent from both lists on purpose: identity (`id`, `trade_id`, `seq`,
+ * `asset_id`), and any state a command transitions (`status`, `closed_on`,
+ * `partial_exited`, `direction`). Readers treat those as invariants — the
+ * units=0 collapse in positionOf, the one-open-trade-per-asset index, the
+ * ladder's partial_exited add-window — so a hand-edit there manufactures states
+ * the rest of the code is written to assume cannot happen. Fix those by
+ * reversing the command that set them.
+ */
+const EDITABLE_TRADE: Record<string, FieldKind> = {
+  opened_on: "date",
+  initial_price: "posnum",
+  initial_stop: "posnum",
+  initial_risk: "num",
+  thesis: "text",
+  origin_session_date: "date",
+};
+
+const EDITABLE_UNIT: Record<string, FieldKind> = {
+  entry_on: "date",
+  entry_price: "posnum",
+  notional: "posnum",
+  risk: "num",
+  stop: "posnum",
+  exit_on: "date",
+  exit_price: "posnum",
+  funding: "num",
+  tag: "text",
+  notes: "text",
+};
+
+/** Why a refused field is refused, for fields someone will plausibly try. */
+const OWNED_BY: Record<string, string> = {
+  status: "set by trade exit",
+  closed_on: "set by trade exit",
+  partial_exited: "set by trade exit --fraction",
+  direction: "fixed at open; close the trade and open a new one",
+  asset_id: "fixed at open; close the trade and open a new one",
+  seq: "identifies the unit",
+  id: "identifies the row",
+  trade_id: "identifies the row",
+  created_at: "a record of when the row was written",
+};
+
+function coerce(key: string, kind: FieldKind, raw: number | string): number | string {
+  if (kind === "text") return String(raw);
+  if (kind === "date") {
+    const v = String(raw).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(`${v}T00:00:00Z`))) {
+      throw new JanusError("VALIDATION", `${key} must be a YYYY-MM-DD date, got ${raw}`);
+    }
+    return v;
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    throw new JanusError("VALIDATION", `${key} must be a number, got ${raw}`);
+  }
+  if (kind === "posnum" && n <= 0) {
+    throw new JanusError("VALIDATION", `${key} must be greater than zero, got ${n}`);
+  }
+  return n;
+}
+
+/**
+ * Correct mistyped fields on a trade, or on one of its units when seq is given.
+ * Returns before/after for every field touched: a silent edit to stored history
+ * is the kind of thing an operator needs to see land.
+ */
+export function editTrade(
+  db: DatabaseSync,
+  tradeId: number,
+  seq: number | undefined,
+  fields: Record<string, number | string>,
+): {
+  trade_id: number;
+  seq?: number;
+  changed: Record<string, { from: number | string | null; to: number | string }>;
+} {
+  requireTrade(db, tradeId);
+  const keys = Object.keys(fields);
+  if (keys.length === 0) {
+    throw new JanusError("VALIDATION", "nothing to change; pass --set key=value");
+  }
+
+  const allowed = seq === undefined ? EDITABLE_TRADE : EDITABLE_UNIT;
+  const target = seq === undefined ? "trade" : "unit";
+  for (const key of keys) {
+    if (allowed[key] !== undefined) continue;
+    const owner = OWNED_BY[key];
+    throw new JanusError(
+      "VALIDATION",
+      owner === undefined
+        ? `${key} is not an editable ${target} field; try: ${Object.keys(allowed).join(", ")}`
+        : `${key} cannot be hand-edited (${owner})`,
+    );
+  }
+
+  const row = (seq === undefined
+    ? db.prepare("SELECT * FROM trade WHERE id = ?").get(tradeId)
+    : db.prepare("SELECT * FROM trade_unit WHERE trade_id = ? AND seq = ?").get(tradeId, seq)) as
+      | Record<string, number | string | null>
+      | undefined;
+  if (row === undefined) throw new JanusError("NOT_FOUND", `no unit ${seq} on trade ${tradeId}`);
+
+  const changed: Record<string, { from: number | string | null; to: number | string }> = {};
+  for (const key of keys) {
+    changed[key] = { from: row[key] ?? null, to: coerce(key, allowed[key]!, fields[key]!) };
+  }
+
+  // Column names come from the allowlist above, never from the caller's string.
+  const assignments = keys.map((k) => `${k} = ?`).join(", ");
+  const values = keys.map((k) => changed[k]!.to);
+  if (seq === undefined) {
+    db.prepare(`UPDATE trade SET ${assignments} WHERE id = ?`).run(...values, tradeId);
+  } else {
+    db.prepare(`UPDATE trade_unit SET ${assignments} WHERE trade_id = ? AND seq = ?`)
+      .run(...values, tradeId, seq);
+  }
+
+  return seq === undefined
+    ? { trade_id: tradeId, changed }
+    : { trade_id: tradeId, seq, changed };
 }
 
 export function getTrade(db: DatabaseSync, tradeId: number): unknown {
