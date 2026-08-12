@@ -367,7 +367,7 @@ Queue: N assets (F flagged, T open trades). Directives: X INITIATE, Y ADD, ...
 
 ## Portfolio heat
 
-<heat block>
+<heat table>
 
 ## Actions for today
 
@@ -432,8 +432,11 @@ that were not flagged today. Sort by absolute `unrealized_r`, descending.
   still fully at risk, and ` (Nd left)` when it is within a week of it. `—` when
   null.
 - **Avg entry** — `summary.avg_entry`, at the asset's normal price precision.
-- **Stop** — the widest `stop` across open units; append ` (BE)` when that stop
-  is at or beyond `avg_entry`.
+- **Stop** — one stop when every open unit shares it. Otherwise the range from
+  widest to tightest, e.g. `62000–65000`. Append ` (BE)` when every open unit
+  sits at or beyond `avg_entry`, or ` (N of M BE)` when only some do. A single
+  widest stop would hide a half-locked ladder and contradict the heat section,
+  which already counts a breakeven unit as carrying no risk.
 - **Notional** — `notional` for that symbol from `janus heat`, whole dollars,
   e.g. `$12,400`. Append ` (N% of cap)` using `notional_used_pct` at whole
   percent, and mark it `⚠` when `within_notional_cap` is false.
@@ -453,51 +456,60 @@ and the book-weighted R.
 
 ### Portfolio heat
 
-Everything in this section is copied from one `janus heat` call. It is a
-read-only guard check: report what the guards say, do not decide whether a
-number is acceptable and do not compute one yourself.
+One table, no prose. Every value is copied from a single `janus heat` call —
+report what the guards say, never decide whether a number is acceptable and
+never compute one yourself.
 
-Open with the book line, then the cluster table, then the verdict:
+| Guardrail | Detail | Status |
+| --- | --- | --- |
+| Book heat | $4,820 of $10,000 (48%) — headroom $5,180 | ✅ |
+| Notional · BTC | $12,400 of $20,000 cap (62%) | ✅ |
+| Notional · ETH | $19,600 of $20,000 cap (98%) | ⚠️ |
+| Notional · SOL | $35,000 of $20,000 cap (175%) | 🚨 |
+| Cluster · Crypto | 4 positions, $152,000 notional, $3,900 heat, 81% of book heat | ℹ️ |
+| Cluster · Equity | 1 position, $32,000 notional, $920 heat, 19% of book heat | ℹ️ |
 
-```markdown
-**Book heat: $4,820 of $10,000 (48%)** — headroom $5,180, within limit.
-Notional on the book: $184,000. Capital: $100,000 at 10% max heat.
+Rows, in this order:
 
-| Cluster | Positions | Notional | Heat | Share of book |
-| --- | --- | --- | --- | --- |
-| Crypto | 4 | $152,000 | $3,900 | 81% |
-| Equity | 1 | $32,000 | $920 | 19% |
+1. **Book heat** — one row, always. Detail is `book.heat` of `book.limit` in
+   whole dollars with `book.used_pct` at whole percent, then `book.headroom`.
+2. **Notional · SYMBOL** — one row per entry in `assets`, in the order returned.
+   Detail is `notional` of `notional_cap` with `notional_used_pct` at whole
+   percent. Append ` · free carry (no heat)` when `free_carry` is true — that is
+   how a position holding live notional shows zero heat.
+3. **Cluster · NAME** — one row per entry in `clusters`, already sorted by heat
+   descending. Detail is `positions`, `notional`, `heat`, and
+   `share_of_book_pct`. A null `cluster_key` is `Unclustered`.
 
-Guards: all clear.
-```
+Status column, by the percentage in that row:
 
-- **Book line** — `book.heat` and `book.limit` in whole dollars, with
-  `book.used_pct` at whole percent, then `book.headroom` and `within limit` /
-  **`over limit`** from `book.within_limit`. Follow with `book.notional`, then
-  `capital` and `book.max_heat_pct`.
-- **Cluster table** — one row per entry in `clusters`, already sorted by heat
-  descending. `cluster_key` title-cased, `positions`, `notional` and `heat` in
-  whole dollars, `share_of_book_pct` at whole percent. An entry whose
-  `cluster_key` is null is `Unclustered`. Omit the table entirely when
-  `clusters` is empty.
-- **Guards line** — `Guards: all clear.` when `breaches` is empty. Otherwise
-  `Guards: N breached.` followed by one bullet per entry in `breaches`, verbatim.
+| Glyph | When |
+| --- | --- |
+| ✅ | below 90% of the limit |
+| ⚠️ | at or above 90% but still within it (`within_limit` / `within_notional_cap` true) |
+| 🚨 | the limit is exceeded (`within_limit` / `within_notional_cap` false) |
+| ℹ️ | no limit is enforced for this row — cluster rows only |
 
-Two things to carry over rather than reason about:
+The 90% warning band is a reporting convention, not a janus parameter. The pass
+and fail states are not: take them from the booleans, never from your own
+comparison of the two dollar figures.
 
-- A position with `free_carry: true` has its stops at breakeven or better and
-  contributes **zero** heat while still holding live notional. If any position
-  is free carry, add one line naming them: `Free carry: BTC, ETH (no heat, still
-  on the book).` It explains a book that looks light on heat but heavy on
-  notional.
-- When `capital_declared` is false, `account_capital` is unset. Every limit is
-  null and nothing can be judged. Replace the whole section with one line:
-  `Portfolio heat: no account_capital set — guards are not being measured.`
-  Do not substitute a capital figure of your own.
+Cluster rows are always ℹ️. janus enforces no per-cluster limit today, so never
+give one a ✅ or a 🚨 — that would imply a check that does not exist.
+`share_of_book_pct` is there to make concentration visible, not to pass or fail
+it.
 
-Cluster rows are **informational**. janus enforces no per-cluster limit today,
-so never write that a cluster is over or under one. `share_of_book_pct` is there
-to make concentration visible, not to pass or fail it.
+Two special cases replace the table entirely:
+
+- **No capital declared** (`capital_declared: false`) — every limit is null and
+  nothing can be judged. Write one line and nothing else: `No account_capital
+  set — guardrails are not being measured.` Never substitute a figure of your own.
+- **Flat book** (`assets` empty) — keep the book heat row alone, with detail
+  `$0 of $10,000 (0%) — no open positions`.
+
+Cross-check before writing the section: every string in `breaches` must
+correspond to a 🚨 row. If it does not, you have mis-keyed a row — re-read the
+envelope rather than reconciling it by hand.
 
 ### Table 3 — actions for today
 
@@ -573,8 +585,7 @@ descending, ties broken by absolute `direction` descending.
 - Omit a section header entirely if that table has no rows. The regime section,
   Table 3, and portfolio heat are never omitted: a quiet day is a result, and a
   missing header reads as a forgotten step rather than "nothing to do". On a
-  flat book, portfolio heat is the single line `Book heat: $0 of $10,000 (0%) —
-  no open positions.`
+  flat book, portfolio heat keeps its table and carries the book heat row alone.
 - Heat, limits, percentages, and breaches come from `janus heat` only. Do not
   add up open risk yourself: a stop at breakeven contributes zero heat while
   still showing risk on the trade row, so a hand-summed total will overstate the
