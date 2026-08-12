@@ -197,6 +197,14 @@ the reads.
    cluster reads, and the resolved parameters, snapshotting the position state as it
    stood. Completes once the queue is fully scored.
 
+   A score is a snapshot, not a live view: `score show` reprints what was stored,
+   so a parameter changed afterward reaches nothing on its own. `score record
+   --recompute` re-runs the formula on that session's stored factors to pick the
+   new value up, keeping the rationale it was written with. Pass `--factor`
+   alongside it to correct one reading without retyping the rest of the bag.
+   Remember that `account_capital` and `max_heat_pct` feed book-wide heat, so
+   changing either dates every score in the session, not just one.
+
 Which metrics each phase actually requires is the formula's business, not the command's —
 see [Metrics and results](#metrics-and-results).
 
@@ -568,7 +576,7 @@ janus screen record <symbol> --metric k=v [--metric k=v ...] [--rationale -]
 janus screen list [--flagged] [--date D]
 
 janus score queue [--date D]
-janus score record <symbol> --factor key=value ... [--rationale -]
+janus score record <symbol> --factor key=value ... [--rationale -] [--recompute]
 janus score show <symbol> [--date D]
 janus score list [--date D]
 

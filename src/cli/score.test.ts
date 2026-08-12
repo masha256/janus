@@ -11,6 +11,7 @@ import { upsertMarkets } from "../db/repo/market.ts";
 import { addAsset, requireAssetBySymbol } from "../db/repo/asset.ts";
 import { recordScreen } from "../db/repo/screen.ts";
 import { recordMacro } from "../db/repo/phase.ts";
+import { setClusterParam } from "../db/repo/cluster.ts";
 import { nextPhase, todayNY } from "../domain/session.ts";
 import { resolveParams } from "../domain/params.ts";
 import { deriveScore } from "../domain/score.ts";
@@ -225,6 +226,59 @@ test("score show reprints a stored score without requiring factors", async () =>
     assert.equal(shown.directive, recorded.directive);
     assert.equal(shown.plan?.directive, recorded.plan?.directive);
     assert.equal(typeof shown.metrics["catalyst"], "number");
+  });
+});
+
+// The stored plan is a snapshot: score show reprints it, so a changed param
+// only reaches the numbers by re-running the formula.
+test("score record --recompute re-runs on the stored factors under new params", async () => {
+  await withHarness(async (file) => {
+    withDb(file, (db) => {
+      recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
+      recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
+        { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
+    });
+
+    const first = (await handle("record", [
+      "BTC", "--factor", "catalyst=2", "--factor", "trend=0", "--factor", "secular=0",
+      "--factor", "crowding=50", "--factor", "divergence=0", "--rationale", "clean breakout",
+    ])) as { direction: number; metrics: Record<string, number> };
+
+    withDb(file, (db) => setClusterParam(db, null, "w_catalyst", 0.9));
+
+    const again = (await handle("record", ["BTC", "--recompute"])) as {
+      direction: number; metrics: Record<string, number>;
+    };
+    assert.deepEqual(again.metrics, first.metrics, "the stored factor bag is reused as-is");
+    assert.notEqual(again.direction, first.direction, "the new weight reached the formula");
+
+    withDb(file, (db) => {
+      const row = db
+        .prepare("SELECT rationale FROM score WHERE session_date = ? AND asset_id = ?")
+        .get(DATE, requireAssetBySymbol(db, "BTC").id) as { rationale: string | null };
+      assert.equal(row.rationale, "clean breakout", "a recompute must not blank the operator's text");
+    });
+
+    // A factor passed alongside --recompute corrects just that one.
+    const fixed = (await handle("record", ["BTC", "--recompute", "--factor", "trend=-2"])) as {
+      metrics: Record<string, number>;
+    };
+    assert.equal(fixed.metrics["trend"], -2);
+    assert.equal(fixed.metrics["catalyst"], 2, "the rest of the bag survives");
+  });
+});
+
+test("score record --recompute fails when there is nothing to recompute", async () => {
+  await withHarness(async (file) => {
+    withDb(file, (db) => {
+      recordMacro(db, DATE, { metrics: { regime: 1.5 }, results: {}, summary: "bullish" }, NOW);
+      recordScreen(db, DATE, requireAssetBySymbol(db, "BTC").id,
+        { flagged: true, rationale: null, metrics: { score: 5, confidence: 1 }, results: { screen_score: 5, threshold: 4, regime: 1.5, regime_smile: 0.9 } }, NOW);
+    });
+    await assert.rejects(
+      () => handle("record", ["BTC", "--recompute"]),
+      (e: Error & { code?: string }) => e.code === "NOT_FOUND",
+    );
   });
 });
 
