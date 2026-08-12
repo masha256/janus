@@ -76,6 +76,10 @@ export function persistenceGate(
  * this needs persistence — the ladder turns a true reading into a full exit.
  *
  * A direction flip is not decay. The EXIT directive branch already owns that.
+ * But the streak must break on a real flip, not on a direction wobbling across
+ * zero: a bare sign test compares against the one value a noisy read crosses
+ * for free, and an asset chopping around 0 would reset the counter every day
+ * and never decay at all. Prior days must be *not decisively against* us.
  */
 export function decayGate(
   conviction: number,
@@ -85,12 +89,13 @@ export function decayGate(
 ): boolean {
   const floor = params["decay_conviction_floor"] ?? 4;
   const required = Math.max(1, Math.round(params["decay_persist_days"] ?? 2));
+  const deadband = Math.abs(params["decay_direction_deadband"] ?? 0.1);
   if (conviction >= floor) return false;
   let count = 1; // today is the first decay day
   for (const s of recentScores) {
-    const sameSide = side !== null &&
-      ((side === "long" && s.direction > 0) || (side === "short" && s.direction < 0));
-    if (sameSide && s.conviction < floor) count++;
+    const opposed = side === null ||
+      (side === "long" ? s.direction < -deadband : s.direction > deadband);
+    if (!opposed && s.conviction < floor) count++;
     else break;
   }
   return count >= required;

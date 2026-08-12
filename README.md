@@ -283,8 +283,14 @@ or blocked.
 | `persistenceGate` | Signal must persist for `signal_persist_days` run-days. | `pass` / `fail` |
 | `trendGate` | Price/MA structure for the proposed direction. | `pass` / `starter` / `fail` / `late_trend` |
 | `binaryGate` | Blocks entry around a known binary event recorded on the screen. | `pass` / `blocked` |
-| `heatGate` | Account-level risk heat (stubbed until sizing is built). | `pass` / `blocked` |
+| `heatGate` | Account-level risk heat against `max_heat_pct` of `account_capital`. | `pass` / `blocked` |
 | `flipflopGate` | After an exit, opposite-side re-entry needs a stronger, persisted signal. | `pass` / `blocked` / `n/a` |
+| `decayGate` | Conviction sitting below `decay_conviction_floor` for `decay_persist_days` on the side held. | `true` / `false` |
+
+`decayGate` is the exception to the line above: it has no field of its own in
+`plan`, and surfaces instead as `stop_event: decay_exit` with the directive
+escalated to `EXIT`. It gates an exit rather than an entry, so it takes no part
+in `size_tier`.
 
 `size_tier` becomes `blocked` if any gate blocks it. It becomes `starter` when no
 gate blocks but at least one gate returns `starter`.
@@ -301,6 +307,9 @@ HOLD/EXIT/TRIM directives still carry the gate status for observability.
 | `signal_conviction_add` | signalGate | `6` | Minimum `conviction` for an aligned position to pass the signal gate for adding. |
 | `signal_direction_exit` | signalGate | `1.0` | Minimum `\|direction\|` against an open position to pass the signal gate for exit. |
 | `signal_persist_days` | persistenceGate | `2` | Run-days the signal gate must have passed, including today. |
+| `decay_conviction_floor` | decayGate | `4` | `conviction` below this counts the day toward a decay run. |
+| `decay_persist_days` | decayGate | `2` | Consecutive run-days below the floor that trigger a decay exit, including today. |
+| `decay_direction_deadband` | decayGate | `0.1` | How far a prior day's `direction` must go against the position to break the decay run. Inside the band the read is noise, not a flip; today's direction is not tested at all. |
 | `trend_sma20_threshold_long` | trendGate | `0` | Long `px_vs_sma20` must be > threshold to be starter or pass. |
 | `trend_sma50_threshold_long` | trendGate | `0` | Long `px_vs_sma50` must be >= threshold to be pass (below is starter). |
 | `trend_sma20_threshold_short` | trendGate | `0` | Short `px_vs_sma20` must be < threshold to be starter or pass. |
@@ -445,7 +454,12 @@ risk dollars and the resulting notional. A `late_trend` result is treated as
 4. **Runner** — trailing stop at `trailing_atr_multiple × ATR`; never widened.
 5. **Late trend** — same trailing distance, but labeled as a tighten.
 6. **Time stop** — full exit if the position sits beyond `max_time_stop_days` still fully at risk (no unit at breakeven, under +1R).
-7. **Signal decay** — pre-breakeven decays exit immediately; post-breakeven decays require two consecutive run-days of confirmation.
+7. **Signal decay** — full exit after `decay_persist_days` consecutive run-days with conviction below `decay_conviction_floor`. Breakeven is *not* an exemption here: unlike the time stop, decay closes a locked-in winner too. Pre- and post-breakeven differ only in the rationale text.
+
+Rungs 6 and 7 are risk rules, not milestones: both are evaluated before the
+entry/breakeven/partial/runner rungs, and both escalate the directive to `EXIT`
+rather than only advising a stop. Everything above them describes a position's
+progression; these two can fire at any point in it.
 
 CLI support:
 - `janus trade open <symbol> --size auto --stop auto` uses the score's sizing plan / ATR.
