@@ -1,5 +1,6 @@
 import type { CoverageValues } from "./coverage.ts";
 import type { UnitRow } from "./trade-math.ts";
+import { daysBetween } from "./session.ts";
 
 export type LadderEvent =
   | "entry"
@@ -205,13 +206,6 @@ export function deriveLadderPlan(inputs: LadderInputs): LadderPlan {
   };
 }
 
-/** Days between two ISO date strings (b -> a), or null if either is invalid. */
-function daysBetween(a: string, b: string): number | null {
-  const ad = Date.parse(a + "T00:00:00Z");
-  const bd = Date.parse(b + "T00:00:00Z");
-  if (Number.isNaN(ad) || Number.isNaN(bd)) return null;
-  return Math.round((ad - bd) / 86_400_000);
-}
 
 /**
  * True if moving a unit stop from old to new would widen the risk.

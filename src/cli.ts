@@ -14,10 +14,12 @@ import * as coverage from "./cli/coverage.ts";
 import * as screen from "./cli/screen.ts";
 import * as score from "./cli/score.ts";
 import * as trade from "./cli/trade.ts";
+import * as heat from "./cli/heat.ts";
 
 const NOUNS: Build[] = [
   init.build, market.build, cluster.build, param.build, asset.build,
   session.build, macro.build, coverage.build, screen.build, score.build, trade.build,
+  heat.build,
 ];
 
 // Same relative path from src/cli.ts and dist/cli.js, so the version never drifts.

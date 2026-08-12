@@ -3,6 +3,7 @@ import type { PositionState, ScorePlan } from "./directive.ts";
 import type { CoverageValues } from "./coverage.ts";
 import type { ScoreContext, ScoreResult } from "./score.ts";
 import { unitsHeat } from "./trade-math.ts";
+import { daysBetween } from "./session.ts";
 
 const boolParam = (params: Record<string, number>, key: string): boolean =>
   (params[key] ?? 0) !== 0;
@@ -221,13 +222,6 @@ export function actionableNewSignal(
   return false;
 }
 
-/** Days between two ISO date strings (a - b), or null if either is invalid. */
-function daysBetween(a: string, b: string): number | null {
-  const ad = Date.parse(a + "T00:00:00Z");
-  const bd = Date.parse(b + "T00:00:00Z");
-  if (Number.isNaN(ad) || Number.isNaN(bd)) return null;
-  return Math.round((ad - bd) / 86_400_000);
-}
 
 export type GateContext = {
   params: Record<string, number>;

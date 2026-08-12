@@ -4,7 +4,7 @@ import { openDb } from "../connect.ts";
 import { migrate } from "../migrate.ts";
 import { upsertMarkets } from "./market.ts";
 import { addAsset, requireAssetBySymbol } from "./asset.ts";
-import { openTrade, addUnit, setStop, exitUnits, editTrade, getTrade, listTrades, partialExitUnit, openTradeForAsset, bookHeat } from "./trade.ts";
+import { openTrade, addUnit, setStop, exitUnits, editTrade, getTrade, listTrades, partialExitUnit, openTradeForAsset, openBook, bookHeat } from "./trade.ts";
 import { positionOf } from "./score.ts";
 
 const NOW = "2026-07-31T12:00:00Z";
@@ -185,6 +185,24 @@ test("editTrade validates the value before writing it", () => {
   // A rejected value leaves the row untouched.
   const t = getTrade(db, id) as { units: { entry_price: number }[] };
   assert.equal(t.units[0]!.entry_price, 100);
+  db.close();
+});
+
+test("openBook reports each open trade with its notional, heat, and oldest entry", () => {
+  const db = fresh();
+  const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
+  addUnit(db, id, { entry_on: "2026-08-05", price: 110, stop: 100, risk: 100, notional: 1100 });
+  const [btc] = openBook(db);
+  assert.equal(btc!.symbol, "BTC");
+  assert.equal(btc!.open_units, 2);
+  assert.equal(btc!.notional, 2100);
+  assert.equal(btc!.first_entry_on, DATE, "the earlier unit sets the clock, not the newest");
+  assert.equal(btc!.heat, bookHeat(db), "one position means the book is just this trade");
+
+  // A closed-out trade is not a position, and must not carry notional forward.
+  exitUnits(db, id, 130, DATE);
+  assert.deepEqual(openBook(db), []);
+  assert.equal(bookHeat(db), 0);
   db.close();
 });
 

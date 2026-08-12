@@ -49,6 +49,14 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
+/** Days between two ISO dates (a − b), or null if either is not a real date. */
+export function daysBetween(a: string, b: string): number | null {
+  const ad = Date.parse(`${a}T00:00:00Z`);
+  const bd = Date.parse(`${b}T00:00:00Z`);
+  if (Number.isNaN(ad) || Number.isNaN(bd)) return null;
+  return Math.round((ad - bd) / 86_400_000);
+}
+
 export function phaseColumn(phase: Phase): string {
   return `${phase}_at`;
 }

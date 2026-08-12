@@ -333,7 +333,14 @@ janus score show <SYMBOL>             # the same row plus the nested `plan`
 janus cluster list                    # cluster_id -> cluster name
 janus trade list --open               # every open trade and its id
 janus trade show <TRADE_ID>           # units, summary, progress (unrealized P&L / R)
+janus heat                            # book/cluster/per-asset risk against the guards
 ```
+
+`janus heat` is the only source for the portfolio-heat section and for the
+notional and days columns of table 2. Never compute heat, a limit, a percentage,
+or a breach yourself: `heat` reads the same book `heatGate` reads, so its
+verdicts are the ones that actually block entries, and a number you derive
+independently will eventually disagree with the gate. Copy its fields.
 
 `score list` carries the plan flattened into `results` (`sizing_suggested_notional`,
 `stop_action`, `trim_target_units`, `entry_max_units`, …) and names the position
@@ -358,6 +365,10 @@ Queue: N assets (F flagged, T open trades). Directives: X INITIATE, Y ADD, ...
 
 <table 2>
 
+## Portfolio heat
+
+<heat block>
+
 ## Actions for today
 
 <table 3>
@@ -374,7 +385,9 @@ Queue: N assets (F flagged, T open trades). Directives: X INITIATE, Y ADD, ...
 An asset appears in **table 2** if it holds an open trade, again in **table 3**
 if today's directive is actionable, and again in **table 4** unless it is a
 flat asset with an action. That overlap is intended: table 2 is the state of
-the book, table 3 is the work list, table 4 is today's scoring read.
+the book, table 3 is the work list, table 4 is today's scoring read. The
+portfolio-heat section sits between them because it is the envelope the work
+list has to fit inside.
 
 ### Regime section
 
@@ -404,7 +417,7 @@ score phase requires both.
 Every open trade from `janus trade list --open`, including trades on assets
 that were not flagged today. Sort by absolute `unrealized_r`, descending.
 
-| Trade | Asset | Cluster | Side | Units | Avg entry | Stop | Open risk | Realized | Unrealized | R | Directive |
+| Trade | Asset | Cluster | Side | Units | Days | Avg entry | Stop | Notional | Open risk | Realized | Unrealized | R | Directive |
 
 - **Trade** — trade id, e.g. `#14`.
 - **Asset** — symbol, e.g. `BTC`.
@@ -413,9 +426,17 @@ that were not flagged today. Sort by absolute `unrealized_r`, descending.
   `trade list` rows, nested under `trade` on `trade show`.
 - **Units** — `summary.open_units`, plus closed count when any have exited,
   e.g. `2` or `2 (+1 closed)`.
+- **Days** — `days_in_trade` for that symbol from `janus heat`, counted from the
+  longest-held open unit, e.g. `42`. This is the same clock the time stop reads,
+  so append ` (time stop)` once it reaches `max_time_stop_days` and the trade is
+  still fully at risk, and ` (Nd left)` when it is within a week of it. `—` when
+  null.
 - **Avg entry** — `summary.avg_entry`, at the asset's normal price precision.
 - **Stop** — the widest `stop` across open units; append ` (BE)` when that stop
   is at or beyond `avg_entry`.
+- **Notional** — `notional` for that symbol from `janus heat`, whole dollars,
+  e.g. `$12,400`. Append ` (N% of cap)` using `notional_used_pct` at whole
+  percent, and mark it `⚠` when `within_notional_cap` is false.
 - **Open risk** — `summary.open_risk`, whole dollars, e.g. `$400`.
 - **Realized** — `summary.realized_pnl`, whole dollars, signed, e.g. `+$620`;
   `—` when no unit has closed.
@@ -427,8 +448,56 @@ that were not flagged today. Sort by absolute `unrealized_r`, descending.
 - **Directive** — today's `directive` for that asset, or `not scored` when the
   asset was not in today's queue.
 
-Close the table with a totals line: open risk, realized, unrealized, and the
-book-weighted R.
+Close the table with a totals line: open risk, notional, realized, unrealized,
+and the book-weighted R.
+
+### Portfolio heat
+
+Everything in this section is copied from one `janus heat` call. It is a
+read-only guard check: report what the guards say, do not decide whether a
+number is acceptable and do not compute one yourself.
+
+Open with the book line, then the cluster table, then the verdict:
+
+```markdown
+**Book heat: $4,820 of $10,000 (48%)** — headroom $5,180, within limit.
+Notional on the book: $184,000. Capital: $100,000 at 10% max heat.
+
+| Cluster | Positions | Notional | Heat | Share of book |
+| --- | --- | --- | --- | --- |
+| Crypto | 4 | $152,000 | $3,900 | 81% |
+| Equity | 1 | $32,000 | $920 | 19% |
+
+Guards: all clear.
+```
+
+- **Book line** — `book.heat` and `book.limit` in whole dollars, with
+  `book.used_pct` at whole percent, then `book.headroom` and `within limit` /
+  **`over limit`** from `book.within_limit`. Follow with `book.notional`, then
+  `capital` and `book.max_heat_pct`.
+- **Cluster table** — one row per entry in `clusters`, already sorted by heat
+  descending. `cluster_key` title-cased, `positions`, `notional` and `heat` in
+  whole dollars, `share_of_book_pct` at whole percent. An entry whose
+  `cluster_key` is null is `Unclustered`. Omit the table entirely when
+  `clusters` is empty.
+- **Guards line** — `Guards: all clear.` when `breaches` is empty. Otherwise
+  `Guards: N breached.` followed by one bullet per entry in `breaches`, verbatim.
+
+Two things to carry over rather than reason about:
+
+- A position with `free_carry: true` has its stops at breakeven or better and
+  contributes **zero** heat while still holding live notional. If any position
+  is free carry, add one line naming them: `Free carry: BTC, ETH (no heat, still
+  on the book).` It explains a book that looks light on heat but heavy on
+  notional.
+- When `capital_declared` is false, `account_capital` is unset. Every limit is
+  null and nothing can be judged. Replace the whole section with one line:
+  `Portfolio heat: no account_capital set — guards are not being measured.`
+  Do not substitute a capital figure of your own.
+
+Cluster rows are **informational**. janus enforces no per-cluster limit today,
+so never write that a cluster is over or under one. `share_of_book_pct` is there
+to make concentration visible, not to pass or fail it.
 
 ### Table 3 — actions for today
 
@@ -501,9 +570,15 @@ descending, ties broken by absolute `direction` descending.
   the operator decides what to execute.
 - Never put a number in the report that did not come out of a janus envelope.
   A missing value is `—`, not an estimate.
-- Omit a section header entirely if that table has no rows. The regime section
-  and Table 3 are never omitted: a quiet day is a result, and a missing header
-  reads as a forgotten step rather than "nothing to do".
+- Omit a section header entirely if that table has no rows. The regime section,
+  Table 3, and portfolio heat are never omitted: a quiet day is a result, and a
+  missing header reads as a forgotten step rather than "nothing to do". On a
+  flat book, portfolio heat is the single line `Book heat: $0 of $10,000 (0%) —
+  no open positions.`
+- Heat, limits, percentages, and breaches come from `janus heat` only. Do not
+  add up open risk yourself: a stop at breakeven contributes zero heat while
+  still showing risk on the trade row, so a hand-summed total will overstate the
+  book and disagree with the gate that actually blocks entries.
 
 ### Commit the report
 

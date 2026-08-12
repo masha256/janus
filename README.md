@@ -454,6 +454,33 @@ When the trend gate returns `starter`, `starter_size_fraction` scales both the
 risk dollars and the resulting notional. A `late_trend` result is treated as
 `starter` for sizing purposes.
 
+### Portfolio heat
+
+`janus heat` reports the open book against its guards. Read-only: it never
+changes a position and never blocks anything on its own.
+
+```
+janus heat
+```
+
+- **book** — total heat and notional, the `max_heat_pct × account_capital`
+  limit, percent used, headroom, and `within_limit`.
+- **clusters** — positions, notional, heat, and share of book heat, ranked.
+  **Informational only**: janus enforces no per-cluster limit. A cluster
+  override of `max_heat_pct` does not scope the guard to that cluster — it
+  tightens the book-wide limit for assets in it, which is why `heat` resolves
+  parameters from the global rung alone.
+- **assets** — per position: notional against `per_asset_max_notional_pct`,
+  heat, `days_in_trade` from the longest-held open unit (the clock the time stop
+  reads), and `free_carry` for a position whose stops are all at breakeven or
+  better and therefore carries live notional at zero heat.
+- **breaches** — every guard currently exceeded, named. Empty means all clear.
+
+It sums `openBook`, the same read `bookHeat` feeds to `heatGate`, so the report
+cannot claim headroom on a day the gate is refusing entries. With no
+`account_capital` set, every limit is null and every verdict is permissive —
+matching `heatGate`, which passes rather than blocks when capital is undeclared.
+
 ### Trade ladder
 
 1. **Entry** — initial stop set; full 1R at risk.
@@ -589,6 +616,8 @@ janus trade exit <trade_id> --price P [--unit SEQ] [--funding N] [--date D]
 janus trade edit <trade_id> [--unit SEQ] --set KEY=VALUE [--set KEY=VALUE ...]
 janus trade list [--open] [--closed] [--asset SYM[,SYM...]]
 janus trade show <trade_id>
+
+janus heat
 ```
 
 ### Position management examples

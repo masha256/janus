@@ -8,8 +8,11 @@ export type UnitRow = {
   exit_price: number | null;
   funding: number;
   tag: string | null;
-  // Sizing / ladder fields (optional for backwards compatibility).
+  // Sizing / ladder fields (optional for backwards compatibility). entry_on is
+  // NOT NULL in the schema and always present on a row read from the db; it is
+  // optional here only so the many fixtures that predate it stay valid.
   partial_exited?: number;
+  entry_on?: string;
 };
 
 export type TradeSummary = {

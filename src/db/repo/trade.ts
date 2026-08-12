@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { JanusError } from "../../output.ts";
 import { tradeSummary, unitsHeat } from "../../domain/trade-math.ts";
 import type { UnitRow } from "../../domain/trade-math.ts";
+import type { BookPosition } from "../../domain/heat.ts";
 
 export type OpenTradeInput = {
   asset_id: number;
@@ -440,13 +441,44 @@ export function listTrades(
  * contributes zero heat, freeing capacity for new positions.
  */
 export function bookHeat(db: DatabaseSync): number {
+  return openBook(db).reduce((sum, p) => sum + p.heat, 0);
+}
+
+/**
+ * Every open position with the figures the heat report needs. `bookHeat` sums
+ * this rather than running its own query, so the report and the gate that
+ * blocks entries can never be reading two different books.
+ */
+export function openBook(db: DatabaseSync): BookPosition[] {
   const rows = db
     .prepare(
-      `SELECT t.id, t.direction FROM trade t WHERE t.status = 'open'`,
+      `SELECT t.id, t.direction, a.symbol, c.key AS cluster_key
+       FROM trade t
+       JOIN asset a ON a.id = t.asset_id
+       LEFT JOIN cluster c ON c.id = a.cluster_id
+       WHERE t.status = 'open'
+       ORDER BY a.symbol`,
     )
-    .all() as { id: number; direction: "long" | "short" }[];
-  return rows.reduce((sum, t) => {
+    .all() as { id: number; direction: "long" | "short"; symbol: string; cluster_key: string | null }[];
+
+  return rows.map((t) => {
     const units = unitsOf(db, t.id);
-    return sum + unitsHeat(units, t.direction);
-  }, 0);
+    const open = units.filter((u) => u.status === "open");
+    return {
+      symbol: t.symbol,
+      cluster_key: t.cluster_key,
+      direction: t.direction,
+      open_units: open.length,
+      notional: open.reduce((a, u) => a + u.notional, 0),
+      heat: unitsHeat(units, t.direction),
+      // The longest-held open unit, which is the clock the time stop reads.
+      first_entry_on: open.reduce<string | null>(
+        (earliest, u) =>
+          u.entry_on === undefined ? earliest
+            : earliest === null || u.entry_on < earliest ? u.entry_on
+            : earliest,
+        null,
+      ),
+    };
+  });
 }
