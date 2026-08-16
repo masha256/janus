@@ -15,6 +15,19 @@ import { pairs, readText, required, unknownVerb } from "./args.js";
 import { collect, handler, withDb } from "./command.js";
 import { JanusError } from "../output.js";
 import { scorePlanFromResults } from "../domain/directive.js";
+/**
+ * Stored factors come back from the metric table as a mixed number/text bag.
+ * Score factors are always numeric — `--factor` parses them with `pairs` — so
+ * anything else in there is not a factor and must not be fed to the formula.
+ */
+function storedFactors(metrics) {
+    const out = {};
+    for (const [key, value] of Object.entries(metrics)) {
+        if (typeof value === "number")
+            out[key] = value;
+    }
+    return out;
+}
 export function build(emit) {
     const cmd = new Command("score")
         .description("The weighted decision for everything in the queue (phase 5)")
@@ -29,6 +42,7 @@ export function build(emit) {
         .option("--factor <KEY=VALUE>", "a scoring factor, -2 to 2; repeatable", collect)
         .option("--rationale <TEXT>", "free text; - reads stdin")
         .option("--date <YYYY-MM-DD>", "address an existing session")
+        .option("--recompute", "re-run the formula on this session's stored factors, picking up changed params")
         .option("--force", "run out of phase order")
         .action(async (symbol, opts) => emit(await record(symbol, opts)));
     cmd.command("show")
@@ -74,7 +88,19 @@ function record(symbol, opts) {
         if (entry === undefined) {
             throw new JanusError("NOT_FLAGGED", `${asset.symbol} is not in the scoring queue for ${session.session_date}`);
         }
-        const factors = pairs(opts.factor, "factor");
+        // --recompute reuses this session's stored factors, so a param change (or a
+        // single corrected factor passed alongside) re-runs the formula without
+        // retyping the whole bag. Given factors win over stored ones.
+        const stored = opts.recompute === true
+            ? getScore(db, session.session_date, asset.id)
+            : undefined;
+        if (opts.recompute === true && stored === undefined) {
+            throw new JanusError("NOT_FOUND", `${asset.symbol} has no score for ${session.session_date} to recompute`);
+        }
+        const factors = {
+            ...(stored === undefined ? {} : storedFactors(stored.metrics)),
+            ...pairs(opts.factor, "factor"),
+        };
         if (Object.keys(factors).length === 0) {
             throw new JanusError("VALIDATION", "at least one --factor key=value is required");
         }
@@ -114,7 +140,9 @@ function record(symbol, opts) {
             direction, conviction, directive,
             queue_reason: entry.queue_reason,
             position_state: formatPosition(position),
-            rationale: readText(opts.rationale) ?? null,
+            // A recompute keeps the rationale it was written with; the upsert would
+            // otherwise blank the operator's own text as a side effect of a param change.
+            rationale: readText(opts.rationale) ?? stored?.rationale ?? null,
             // The factors as given; everything else the formula concluded alongside.
             metrics: factors,
             results: { ...results, ...planResults(plan), plan_directive: plan.directive },

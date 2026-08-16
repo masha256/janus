@@ -722,6 +722,60 @@ test("an ADD keeps its lock-the-earlier-unit stop rule on the ladder's entry run
   assert.equal(plan.stop_plan?.event, undefined, "the entry rung must not overwrite an ADD's stop rule");
 });
 
+test("an add for an asset already at its per-asset notional cap downgrades to HOLD", () => {
+  // Same fixture as the ADD control, but the open unit already uses the full
+  // 20% per-asset cap (100k capital -> 20000).
+  const base = contextWithOpenTrade({ mark: 105, atr14: 5, stop: 90 });
+  const c: ScoreContext = {
+    ...base,
+    open_trade: {
+      ...base.open_trade!,
+      units: [{ ...base.open_trade!.units[0]!, notional: 20000 }],
+    },
+    recent_scores: [strongPrior],
+  };
+  const { plan } = deriveScore(initiateMetrics, c, PARAMS);
+  assert.equal(plan.directive, "HOLD");
+  assert.match(plan.reason, /per-asset notional cap/);
+  assert.equal(plan.sizing_plan, undefined);
+});
+
+test("an add sizes against the remaining per-asset headroom, not the full cap", () => {
+  // Open unit uses 15000 of the 20000 cap: the add may only suggest 5000.
+  const base = contextWithOpenTrade({ mark: 105, atr14: 5, stop: 90 });
+  const c: ScoreContext = {
+    ...base,
+    open_trade: {
+      ...base.open_trade!,
+      units: [{ ...base.open_trade!.units[0]!, notional: 15000 }],
+    },
+    recent_scores: [strongPrior],
+  };
+  const { plan } = deriveScore(initiateMetrics, c, PARAMS);
+  assert.equal(plan.directive, "ADD");
+  assert.equal(plan.sizing_plan?.suggested_notional, 5000);
+});
+
+test("an add whose risk would breach the book heat limit is blocked", () => {
+  // Book heat 9900 of the 10000 limit: the add's own risk busts it.
+  const c: ScoreContext = {
+    ...contextWithOpenTrade({ mark: 105, atr14: 5, stop: 90 }),
+    recent_scores: [strongPrior],
+    current_heat: 9900,
+  };
+  const { plan } = deriveScore(initiateMetrics, c, PARAMS);
+  assert.equal(plan.heat_gate, "blocked");
+  assert.equal(plan.directive, "HOLD");
+  assert.match(plan.reason, /heat/);
+});
+
+test("an entry whose sized risk would breach the book heat limit stands aside", () => {
+  const c: ScoreContext = { ...contextFlat(), current_heat: 9900 };
+  const { plan } = deriveScore(initiateMetrics, c, PARAMS);
+  assert.equal(plan.heat_gate, "blocked");
+  assert.equal(plan.directive, "STAND_ASIDE");
+});
+
 test("an escalated EXIT drops the TRIM's trim_plan", () => {
   const twoUnits = (recent: import("./score.ts").ScoreResult[]): ScoreContext => ({
     ...contextWithOpenTrade({ mark: 130, atr14: 5, stop: 100, partialExited: true }),

@@ -60,12 +60,27 @@ export function setStop(db, tradeId, stop, seq) {
         throw new JanusError("VALIDATION", `no open unit to move on trade ${tradeId}`);
     return changed;
 }
-/** Omitting seq exits every open unit and closes the trade. */
+/**
+ * Omitting seq exits every open unit and closes the trade.
+ *
+ * `funding` is a total for the exit, not a per-unit figure — the CLI asks for
+ * "funding paid/received over the hold". Writing it unchanged onto every unit
+ * multiplied it by the unit count, because trade-math sums funding across units.
+ */
 export function exitUnits(db, tradeId, price, exitOn, seq, funding) {
     requireTrade(db, tradeId);
     db.exec("BEGIN");
     try {
-        const fundingValue = funding ?? 0;
+        // ponytail: an even split across the closing units. Funding really accrues
+        // per notional per day, but nothing reads a unit's funding on its own —
+        // only the total — so the split just has to sum back. Weight it by notional
+        // if a per-unit figure ever gets surfaced.
+        const closing = seq === undefined
+            ? db
+                .prepare("SELECT COUNT(*) AS n FROM trade_unit WHERE trade_id = ? AND status = 'open'")
+                .get(tradeId).n
+            : 1;
+        const fundingValue = (funding ?? 0) / Math.max(1, closing);
         const result = seq === undefined
             ? db.prepare("UPDATE trade_unit SET status='closed', exit_price=?, exit_on=?, funding=? WHERE trade_id=? AND status='open'").run(price, exitOn, fundingValue, tradeId)
             : db.prepare("UPDATE trade_unit SET status='closed', exit_price=?, exit_on=?, funding=? WHERE trade_id=? AND seq=? AND status='open'").run(price, exitOn, fundingValue, tradeId, seq);
@@ -160,6 +175,112 @@ export function openTradeForAsset(db, assetId) {
         opened_on: row.opened_on,
     };
 }
+/**
+ * Hand-correctable fields: the figures an operator typed in, and nothing else.
+ *
+ * Absent from both lists on purpose: identity (`id`, `trade_id`, `seq`,
+ * `asset_id`), and any state a command transitions (`status`, `closed_on`,
+ * `partial_exited`, `direction`). Readers treat those as invariants — the
+ * units=0 collapse in positionOf, the one-open-trade-per-asset index, the
+ * ladder's partial_exited add-window — so a hand-edit there manufactures states
+ * the rest of the code is written to assume cannot happen. Fix those by
+ * reversing the command that set them.
+ */
+const EDITABLE_TRADE = {
+    opened_on: "date",
+    initial_price: "posnum",
+    initial_stop: "posnum",
+    initial_risk: "num",
+    thesis: "text",
+    origin_session_date: "date",
+};
+const EDITABLE_UNIT = {
+    entry_on: "date",
+    entry_price: "posnum",
+    notional: "posnum",
+    risk: "num",
+    stop: "posnum",
+    exit_on: "date",
+    exit_price: "posnum",
+    funding: "num",
+    tag: "text",
+    notes: "text",
+};
+/** Why a refused field is refused, for fields someone will plausibly try. */
+const OWNED_BY = {
+    status: "set by trade exit",
+    closed_on: "set by trade exit",
+    partial_exited: "set by trade exit --fraction",
+    direction: "fixed at open; close the trade and open a new one",
+    asset_id: "fixed at open; close the trade and open a new one",
+    seq: "identifies the unit",
+    id: "identifies the row",
+    trade_id: "identifies the row",
+    created_at: "a record of when the row was written",
+};
+function coerce(key, kind, raw) {
+    if (kind === "text")
+        return String(raw);
+    if (kind === "date") {
+        const v = String(raw).trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(`${v}T00:00:00Z`))) {
+            throw new JanusError("VALIDATION", `${key} must be a YYYY-MM-DD date, got ${raw}`);
+        }
+        return v;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n)) {
+        throw new JanusError("VALIDATION", `${key} must be a number, got ${raw}`);
+    }
+    if (kind === "posnum" && n <= 0) {
+        throw new JanusError("VALIDATION", `${key} must be greater than zero, got ${n}`);
+    }
+    return n;
+}
+/**
+ * Correct mistyped fields on a trade, or on one of its units when seq is given.
+ * Returns before/after for every field touched: a silent edit to stored history
+ * is the kind of thing an operator needs to see land.
+ */
+export function editTrade(db, tradeId, seq, fields) {
+    requireTrade(db, tradeId);
+    const keys = Object.keys(fields);
+    if (keys.length === 0) {
+        throw new JanusError("VALIDATION", "nothing to change; pass --set key=value");
+    }
+    const allowed = seq === undefined ? EDITABLE_TRADE : EDITABLE_UNIT;
+    const target = seq === undefined ? "trade" : "unit";
+    for (const key of keys) {
+        if (allowed[key] !== undefined)
+            continue;
+        const owner = OWNED_BY[key];
+        throw new JanusError("VALIDATION", owner === undefined
+            ? `${key} is not an editable ${target} field; try: ${Object.keys(allowed).join(", ")}`
+            : `${key} cannot be hand-edited (${owner})`);
+    }
+    const row = (seq === undefined
+        ? db.prepare("SELECT * FROM trade WHERE id = ?").get(tradeId)
+        : db.prepare("SELECT * FROM trade_unit WHERE trade_id = ? AND seq = ?").get(tradeId, seq));
+    if (row === undefined)
+        throw new JanusError("NOT_FOUND", `no unit ${seq} on trade ${tradeId}`);
+    const changed = {};
+    for (const key of keys) {
+        changed[key] = { from: row[key] ?? null, to: coerce(key, allowed[key], fields[key]) };
+    }
+    // Column names come from the allowlist above, never from the caller's string.
+    const assignments = keys.map((k) => `${k} = ?`).join(", ");
+    const values = keys.map((k) => changed[k].to);
+    if (seq === undefined) {
+        db.prepare(`UPDATE trade SET ${assignments} WHERE id = ?`).run(...values, tradeId);
+    }
+    else {
+        db.prepare(`UPDATE trade_unit SET ${assignments} WHERE trade_id = ? AND seq = ?`)
+            .run(...values, tradeId, seq);
+    }
+    return seq === undefined
+        ? { trade_id: tradeId, changed }
+        : { trade_id: tradeId, seq, changed };
+}
 export function getTrade(db, tradeId) {
     const trade = requireTrade(db, tradeId);
     const units = unitsOf(db, tradeId);
@@ -191,11 +312,36 @@ export function listTrades(db, filters) {
  * contributes zero heat, freeing capacity for new positions.
  */
 export function bookHeat(db) {
+    return openBook(db).reduce((sum, p) => sum + p.heat, 0);
+}
+/**
+ * Every open position with the figures the heat report needs. `bookHeat` sums
+ * this rather than running its own query, so the report and the gate that
+ * blocks entries can never be reading two different books.
+ */
+export function openBook(db) {
     const rows = db
-        .prepare(`SELECT t.id, t.direction FROM trade t WHERE t.status = 'open'`)
+        .prepare(`SELECT t.id, t.direction, a.symbol, c.key AS cluster_key
+       FROM trade t
+       JOIN asset a ON a.id = t.asset_id
+       LEFT JOIN cluster c ON c.id = a.cluster_id
+       WHERE t.status = 'open'
+       ORDER BY a.symbol`)
         .all();
-    return rows.reduce((sum, t) => {
+    return rows.map((t) => {
         const units = unitsOf(db, t.id);
-        return sum + unitsHeat(units, t.direction);
-    }, 0);
+        const open = units.filter((u) => u.status === "open");
+        return {
+            symbol: t.symbol,
+            cluster_key: t.cluster_key,
+            direction: t.direction,
+            open_units: open.length,
+            notional: open.reduce((a, u) => a + u.notional, 0),
+            heat: unitsHeat(units, t.direction),
+            // The longest-held open unit, which is the clock the time stop reads.
+            first_entry_on: open.reduce((earliest, u) => u.entry_on === undefined ? earliest
+                : earliest === null || u.entry_on < earliest ? u.entry_on
+                    : earliest, null),
+        };
+    });
 }

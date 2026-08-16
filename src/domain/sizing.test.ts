@@ -33,6 +33,33 @@ test("sizeFromRiskAndStop risks the full budget when the cap does not bind", () 
   assert.equal(result.heatDollars, 700);
 });
 
+test("sizeFromRiskAndStop caps an add at the remaining per-asset headroom", () => {
+  const result = sizeFromRiskAndStop({
+    capital: 100000,
+    maxRiskPct: 5,
+    conviction: 7,
+    stopDistancePct: 0.04,
+    perAssetMaxNotionalPct: 20,
+    existingNotional: 15000,
+  });
+  assert.equal(result.perAssetCapDollars, 20000);
+  assert.equal(result.cappedPositionSizeDollars, 5000); // 20000 cap - 15000 already on
+  assert.equal(result.riskDollars, 200);
+});
+
+test("sizeFromRiskAndStop sizes zero at or over the per-asset cap", () => {
+  const result = sizeFromRiskAndStop({
+    capital: 100000,
+    maxRiskPct: 5,
+    conviction: 7,
+    stopDistancePct: 0.04,
+    perAssetMaxNotionalPct: 20,
+    existingNotional: 25000,
+  });
+  assert.equal(result.cappedPositionSizeDollars, 0);
+  assert.equal(result.riskDollars, 0);
+});
+
 test("sizeFromRiskAndStop does not divide by zero", () => {
   const result = sizeFromRiskAndStop({
     capital: 100000,

@@ -30,6 +30,14 @@ test("conviction at or above the floor is never decay", () => {
 test("an opposite-side prior score breaks the run", () => {
     assert.equal(decayGate(3, "long", [score(-1, 3)], PARAMS), false);
 });
+// A direction chopping around zero must not reset the streak: a bare sign test
+// let an asset like that stay low-conviction forever without ever decaying.
+test("a prior direction inside the deadband does not break the run", () => {
+    assert.equal(decayGate(3, "long", [score(-0.03, 3)], PARAMS), true, "noise, not a flip");
+    assert.equal(decayGate(3, "long", [score(-0.5, 3)], PARAMS), false, "a real flip still breaks");
+    assert.equal(decayGate(3, "short", [score(0.03, 3)], PARAMS), true);
+    assert.equal(decayGate(3, "short", [score(0.5, 3)], PARAMS), false);
+});
 test("a flat position never decays, since there is no side to match", () => {
     assert.equal(decayGate(3, null, [score(1, 3)], PARAMS), false);
 });

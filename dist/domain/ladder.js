@@ -1,3 +1,4 @@
+import { daysBetween } from "./session.js";
 export function deriveLadderPlan(inputs) {
     const { direction, units, entryPrice, initialRisk, coverage, openedOn, today, addWindowOpen, lateTrend, decaySignal, params, } = inputs;
     const sign = direction === "long" ? 1 : -1;
@@ -139,14 +140,6 @@ export function deriveLadderPlan(inputs) {
         affected_units: "all",
         rationale: "ladder waiting for next milestone",
     };
-}
-/** Days between two ISO date strings (b -> a), or null if either is invalid. */
-function daysBetween(a, b) {
-    const ad = Date.parse(a + "T00:00:00Z");
-    const bd = Date.parse(b + "T00:00:00Z");
-    if (Number.isNaN(ad) || Number.isNaN(bd))
-        return null;
-    return Math.round((ad - bd) / 86_400_000);
 }
 /**
  * True if moving a unit stop from old to new would widen the risk.

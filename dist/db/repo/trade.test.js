@@ -4,7 +4,7 @@ import { openDb } from "../connect.js";
 import { migrate } from "../migrate.js";
 import { upsertMarkets } from "./market.js";
 import { addAsset, requireAssetBySymbol } from "./asset.js";
-import { openTrade, addUnit, setStop, exitUnits, getTrade, listTrades, partialExitUnit, openTradeForAsset, bookHeat } from "./trade.js";
+import { openTrade, addUnit, setStop, exitUnits, editTrade, getTrade, listTrades, partialExitUnit, openTradeForAsset, openBook, bookHeat } from "./trade.js";
 import { positionOf } from "./score.js";
 const NOW = "2026-07-31T12:00:00Z";
 const DATE = "2026-07-31";
@@ -78,6 +78,27 @@ test("exiting every unit closes the trade", () => {
     assert.equal(t.trade.closed_on, DATE);
     db.close();
 });
+// --funding is the cost over the hold for the whole exit. Writing it onto every
+// unit made a 3-unit exit record 3x what was paid, since trade-math sums it.
+test("funding on a multi-unit exit is a total, not per unit", () => {
+    const db = fresh();
+    const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
+    addUnit(db, id, { entry_on: DATE, price: 100, stop: 90, risk: 100, notional: 1000 });
+    addUnit(db, id, { entry_on: DATE, price: 100, stop: 90, risk: 100, notional: 1000 });
+    exitUnits(db, id, 130, DATE, undefined, -120);
+    const t = getTrade(db, id);
+    assert.equal(t.summary.total_funding, -120);
+    db.close();
+});
+test("funding on a single named unit is recorded whole", () => {
+    const db = fresh();
+    const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
+    addUnit(db, id, { entry_on: DATE, price: 100, stop: 90, risk: 100, notional: 1000 });
+    exitUnits(db, id, 130, DATE, 1, -40);
+    const t = getTrade(db, id);
+    assert.equal(t.summary.total_funding, -40);
+    db.close();
+});
 test("a partial exit leaves the trade open", () => {
     const db = fresh();
     const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
@@ -103,6 +124,60 @@ test("exiting an already-closed unit is rejected", () => {
     const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
     exitUnits(db, id, 130, DATE);
     assert.throws(() => exitUnits(db, id, 140, DATE), (e) => e.code === "VALIDATION");
+    db.close();
+});
+test("editTrade fixes a mistyped unit field and reports before/after", () => {
+    const db = fresh();
+    const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
+    exitUnits(db, id, 130, DATE, undefined, 120); // sign typo: paid, not received
+    const res = editTrade(db, id, 1, { funding: -120 });
+    assert.deepEqual(res.changed["funding"], { from: 120, to: -120 });
+    const t = getTrade(db, id);
+    assert.equal(t.summary.total_funding, -120);
+    db.close();
+});
+test("editTrade refuses fields the commands own, and unknown ones", () => {
+    const db = fresh();
+    const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
+    const isValidation = (e) => e.code === "VALIDATION";
+    // Editing status by hand is what produces an open trade with no open units.
+    assert.throws(() => editTrade(db, id, 1, { status: "closed" }), isValidation);
+    assert.throws(() => editTrade(db, id, undefined, { direction: "short" }), isValidation);
+    assert.throws(() => editTrade(db, id, 1, { partial_exited: 1 }), isValidation);
+    assert.throws(() => editTrade(db, id, 1, { nonsense: 1 }), isValidation);
+    // Unit fields are not trade fields and vice versa.
+    assert.throws(() => editTrade(db, id, undefined, { funding: -1 }), isValidation);
+    assert.throws(() => editTrade(db, id, 1, { thesis: "x" }), isValidation);
+    assert.throws(() => editTrade(db, id, 1, {}), isValidation);
+    db.close();
+});
+test("editTrade validates the value before writing it", () => {
+    const db = fresh();
+    const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
+    const isValidation = (e) => e.code === "VALIDATION";
+    assert.throws(() => editTrade(db, id, 1, { entry_on: "31-07-2026" }), isValidation);
+    assert.throws(() => editTrade(db, id, 1, { entry_price: 0 }), isValidation);
+    assert.throws(() => editTrade(db, id, 1, { entry_price: "abc" }), isValidation);
+    assert.throws(() => editTrade(db, id, 9, { funding: -1 }), (e) => e.code === "NOT_FOUND");
+    // A rejected value leaves the row untouched.
+    const t = getTrade(db, id);
+    assert.equal(t.units[0].entry_price, 100);
+    db.close();
+});
+test("openBook reports each open trade with its notional, heat, and oldest entry", () => {
+    const db = fresh();
+    const id = openTrade(db, { ...input, asset_id: requireAssetBySymbol(db, "BTC").id }, NOW);
+    addUnit(db, id, { entry_on: "2026-08-05", price: 110, stop: 100, risk: 100, notional: 1100 });
+    const [btc] = openBook(db);
+    assert.equal(btc.symbol, "BTC");
+    assert.equal(btc.open_units, 2);
+    assert.equal(btc.notional, 2100);
+    assert.equal(btc.first_entry_on, DATE, "the earlier unit sets the clock, not the newest");
+    assert.equal(btc.heat, bookHeat(db), "one position means the book is just this trade");
+    // A closed-out trade is not a position, and must not carry notional forward.
+    exitUnits(db, id, 130, DATE);
+    assert.deepEqual(openBook(db), []);
+    assert.equal(bookHeat(db), 0);
     db.close();
 });
 test("listTrades filters by status and symbol", () => {

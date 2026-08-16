@@ -433,7 +433,9 @@ function derivePlan(
         flipflop_gate: flipflop,
         regime_trigger: regimeTrigger,
       };
-    } else if (sizeTier === "blocked") {
+    } else if (sizeTier === "blocked" || heat === "blocked") {
+      // `heat` is the recompute that saw the sized entry's risk; sizeTier was
+      // set before sizing and cannot have.
       const gateReasons = blockingGates();
       plan = {
         directive: "STAND_ASIDE",
@@ -473,6 +475,13 @@ function derivePlan(
     const misaligned = side !== null && !aligned;
     const disagreement = misaligned ? absDirection : 0;
     const directionExit = params["signal_direction_exit"] ?? 1.0;
+
+    // Sizing for a would-be add is headroom-capped: a position already at the
+    // per-asset notional cap sizes to zero, and that is a HOLD, not an ADD.
+    const addSizing = aligned && isWorking
+      ? buildSizingPlan(posSide, context, params, sizeTier, conviction)
+      : undefined;
+    const atAssetCap = addSizing !== undefined && addSizing.suggested_notional <= 0;
 
     if (regimeForcesExit(posSide)) {
       plan = {
@@ -519,8 +528,9 @@ function derivePlan(
           ? { target_units: targetUnits, which: "newest" }
           : undefined,
       };
-    } else if (aligned && sizeTier !== "blocked" && posUnits < maxUnits && isWorking) {
-      sizingPlan = buildSizingPlan(posSide, context, params, sizeTier, conviction);
+    } else if (aligned && sizeTier !== "blocked" && heat !== "blocked" && posUnits < maxUnits && isWorking
+        && !atAssetCap) {
+      sizingPlan = addSizing;
       plan = {
         directive: "ADD",
         reason: `position working, direction ${direction.toFixed(2)} conviction ${conviction} allow add${sizeTier === "starter" ? " (starter tier)" : ""}`,
@@ -539,11 +549,12 @@ function derivePlan(
       // back by something — a blocked gate or the unit cap. Say which: "thesis
       // intact" alone reads as all-clear, and the operator cannot tell a
       // healthy hold from one silently capped by heat.
-      const gateReasons = sizeTier === "blocked" ? blockingGates() : [];
+      const gateReasons = sizeTier === "blocked" || heat === "blocked" ? blockingGates() : [];
       const held = gateReasons.length > 0
         ? `; add blocked by ${gateReasons.join(", ")} gate(s)`
         : sizeTier === "blocked" ? "; add blocked"
         : posUnits >= maxUnits ? `; at max ${maxUnits} units`
+        : atAssetCap ? "; at per-asset notional cap"
         : "";
       plan = {
         directive: "HOLD",
@@ -666,8 +677,9 @@ function buildProposedHeat(
   sizeTier: ScorePlan["size_tier"],
   conviction: number,
 ): number {
-  if (position.side !== null) return 0; // existing position adds no new heat in this decision
   if (side === null) return 0;
+  // Against-position signals resolve to exit/trim; only entries and adds bring new heat.
+  if (position.side !== null && position.side !== side) return 0;
   const sizing = buildSizingPlan(side, context, params, sizeTier, conviction);
   return sizing?.risk_dollars ?? 0;
 }
@@ -699,12 +711,17 @@ function buildSizingPlan(
     : 1;
   const maxRiskPct = (params["per_trade_max_risk_pct"] ?? 5) * starterFraction;
 
+  const existingNotional = (context.open_trade?.units ?? [])
+    .filter((u) => u.status === "open")
+    .reduce((a, u) => a + u.notional, 0);
+
   const result = sizeFromRiskAndStop({
     capital,
     maxRiskPct,
     conviction,
     stopDistancePct: distPct,
     perAssetMaxNotionalPct: params["per_asset_max_notional_pct"] ?? 20,
+    existingNotional,
   });
 
   const currentHeat = context.current_heat ?? 0;

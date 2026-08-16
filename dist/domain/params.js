@@ -38,8 +38,11 @@ export const DEFAULT_PARAMS = {
     // persistenceGate — how many run-days the signalGate must have passed.
     signal_persist_days: 2,
     // decayGate — conviction floor and how many run-days below it triggers decay.
+    // The deadband is how far against us a prior day's direction must go to break
+    // the streak; inside it the read is noise, not a flip.
     decay_conviction_floor: 4,
     decay_persist_days: 2,
+    decay_direction_deadband: 0.1,
     // trendGate — explicit 20/50 MA band thresholds and late-trend caution.
     // Long: px_vs_sma20 > t20_long and px_vs_sma50 < t50_long -> starter;
     //       px_vs_sma20 > t20_long and px_vs_sma50 >= t50_long -> pass.

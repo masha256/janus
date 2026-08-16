@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { requireAssetBySymbol, requireSymbols } from "../db/repo/asset.ts";
-import { openTrade, addUnit, setStop, exitUnits, partialExitUnit, editTrade, getTrade, listTrades } from "../db/repo/trade.ts";
+import { openTrade, addUnit, setStop, exitUnits, partialExitUnit, editTrade, getTrade, listTrades, openTradeForAsset } from "../db/repo/trade.ts";
 import { getSession } from "../db/repo/session.ts";
 import { latestCoverage } from "../db/repo/coverage.ts";
 import { todayNY, nowIso } from "../domain/session.ts";
@@ -335,12 +335,16 @@ function resolveEntryInputs(opts: {
       if (distPct <= 0) {
         throw new JanusError("VALIDATION", "auto size requires a valid stop distance");
       }
+      const openUnits = openTradeForAsset(opts.db, opts.assetId)?.units ?? [];
       const result = sizeFromRiskAndStop({
         capital: opts.params["account_capital"] ?? 0,
         maxRiskPct: opts.params["per_trade_max_risk_pct"] ?? 5,
         conviction: score?.conviction ?? opts.params["signal_conviction_initiate"] ?? 6,
         stopDistancePct: distPct,
         perAssetMaxNotionalPct: opts.params["per_asset_max_notional_pct"] ?? 20,
+        existingNotional: openUnits
+          .filter((u) => u.status === "open")
+          .reduce((a, u) => a + u.notional, 0),
       });
       notional = result.cappedPositionSizeDollars;
     }

@@ -14,9 +14,11 @@ import * as coverage from "./cli/coverage.js";
 import * as screen from "./cli/screen.js";
 import * as score from "./cli/score.js";
 import * as trade from "./cli/trade.js";
+import * as heat from "./cli/heat.js";
 const NOUNS = [
     init.build, market.build, cluster.build, param.build, asset.build,
     session.build, macro.build, coverage.build, screen.build, score.build, trade.build,
+    heat.build,
 ];
 // Same relative path from src/cli.ts and dist/cli.js, so the version never drifts.
 const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));

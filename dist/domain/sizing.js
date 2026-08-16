@@ -16,7 +16,8 @@ export function sizeFromRiskAndStop(inputs) {
     const budgetDollars = capital * (maxRiskPct / 100) * (conviction / 10);
     const positionSizeDollars = stopDistancePct > 0 ? budgetDollars / stopDistancePct : 0;
     const perAssetCapDollars = capital * (perAssetMaxNotionalPct / 100);
-    const cappedPositionSizeDollars = Math.min(positionSizeDollars, perAssetCapDollars);
+    const headroomDollars = Math.max(0, perAssetCapDollars - (inputs.existingNotional ?? 0));
+    const cappedPositionSizeDollars = Math.min(positionSizeDollars, headroomDollars);
     const riskDollars = cappedPositionSizeDollars * stopDistancePct;
     return {
         riskDollars,

@@ -31,6 +31,14 @@ export function todayNY(now) {
 export function nowIso() {
     return new Date().toISOString();
 }
+/** Days between two ISO dates (a − b), or null if either is not a real date. */
+export function daysBetween(a, b) {
+    const ad = Date.parse(`${a}T00:00:00Z`);
+    const bd = Date.parse(`${b}T00:00:00Z`);
+    if (Number.isNaN(ad) || Number.isNaN(bd))
+        return null;
+    return Math.round((ad - bd) / 86_400_000);
+}
 export function phaseColumn(phase) {
     return `${phase}_at`;
 }

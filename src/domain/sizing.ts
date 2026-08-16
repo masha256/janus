@@ -4,6 +4,8 @@ export type SizingInputs = {
   conviction: number;
   stopDistancePct: number;
   perAssetMaxNotionalPct: number;
+  /** Notional already open in this asset; the cap applies to the total, not per order. */
+  existingNotional?: number;
 };
 
 export type SizingResult = {
@@ -32,7 +34,8 @@ export function sizeFromRiskAndStop(inputs: SizingInputs): SizingResult {
   const budgetDollars = capital * (maxRiskPct / 100) * (conviction / 10);
   const positionSizeDollars = stopDistancePct > 0 ? budgetDollars / stopDistancePct : 0;
   const perAssetCapDollars = capital * (perAssetMaxNotionalPct / 100);
-  const cappedPositionSizeDollars = Math.min(positionSizeDollars, perAssetCapDollars);
+  const headroomDollars = Math.max(0, perAssetCapDollars - (inputs.existingNotional ?? 0));
+  const cappedPositionSizeDollars = Math.min(positionSizeDollars, headroomDollars);
   const riskDollars = cappedPositionSizeDollars * stopDistancePct;
   return {
     riskDollars,

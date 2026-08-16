@@ -1,18 +1,18 @@
 import { Command } from "commander";
 import { requireAssetBySymbol, requireSymbols } from "../db/repo/asset.js";
-import { openTrade, addUnit, setStop, exitUnits, partialExitUnit, getTrade, listTrades } from "../db/repo/trade.js";
+import { openTrade, addUnit, setStop, exitUnits, partialExitUnit, editTrade, getTrade, listTrades, openTradeForAsset } from "../db/repo/trade.js";
 import { getSession } from "../db/repo/session.js";
 import { latestCoverage } from "../db/repo/coverage.js";
 import { todayNY, nowIso } from "../domain/session.js";
-import { csv, finite, num, oneOf, positive, readText, required, unknownVerb } from "./args.js";
-import { handler, withDb } from "./command.js";
+import { csv, finite, metricPairs, num, oneOf, positive, readText, required, unknownVerb } from "./args.js";
+import { collect, handler, withDb } from "./command.js";
 import { JanusError } from "../output.js";
 import { getScore } from "../db/repo/score.js";
 import { getGlobalParams, getClusterParams } from "../db/repo/cluster.js";
 import { resolveParams } from "../domain/params.js";
 import { sizeFromRiskAndStop, stopDistancePct, stopFromAtr } from "../domain/sizing.js";
 import { isStopWidening, proposeTrailingStop } from "../domain/ladder.js";
-const VERBS = "open, add-unit, set-stop, exit, list, show";
+const VERBS = "open, add-unit, set-stop, exit, edit, list, show";
 // Risk may legitimately be 0 once a stop has been moved past entry (free carry).
 const RISK_MAX = Number.MAX_SAFE_INTEGER;
 function tradeId(raw) {
@@ -75,6 +75,12 @@ export function build(emit) {
         .option("--date <YYYY-MM-DD>", "the real exit date")
         .option("--fraction <N>", "bank only this fraction of one unit, 0 < N < 1; requires --unit")
         .action(async (id, opts) => emit(await exit(id, opts)));
+    cmd.command("edit")
+        .description("Correct a mistyped field on a trade, or on one unit with --unit")
+        .argument("[trade_id]", "trade id")
+        .option("--unit <SEQ>", "correct this unit instead of the trade itself")
+        .option("--set <KEY=VALUE>", "field to correct; repeatable", collect)
+        .action(async (id, opts) => emit(await edit(id, opts)));
     cmd.command("list")
         .description("List trades")
         .option("--open", "only open trades")
@@ -206,6 +212,15 @@ function exit(raw, opts) {
         return { ...res, ...getTrade(db, id) };
     });
 }
+function edit(raw, opts) {
+    return withDb((db) => {
+        const id = tradeId(raw);
+        // Unlike exit and set-stop, a bare `edit` means the trade row itself, not
+        // "every unit": correcting one typo across all units is never the intent.
+        const res = editTrade(db, id, unitSeq(opts.unit), metricPairs(opts.set, "set"));
+        return { ...res, ...getTrade(db, id) };
+    });
+}
 function list(opts) {
     return withDb((db) => {
         const status = opts.open === true ? "open" : opts.closed === true ? "closed" : undefined;
@@ -254,12 +269,16 @@ function resolveEntryInputs(opts) {
             if (distPct <= 0) {
                 throw new JanusError("VALIDATION", "auto size requires a valid stop distance");
             }
+            const openUnits = openTradeForAsset(opts.db, opts.assetId)?.units ?? [];
             const result = sizeFromRiskAndStop({
                 capital: opts.params["account_capital"] ?? 0,
                 maxRiskPct: opts.params["per_trade_max_risk_pct"] ?? 5,
                 conviction: score?.conviction ?? opts.params["signal_conviction_initiate"] ?? 6,
                 stopDistancePct: distPct,
                 perAssetMaxNotionalPct: opts.params["per_asset_max_notional_pct"] ?? 20,
+                existingNotional: openUnits
+                    .filter((u) => u.status === "open")
+                    .reduce((a, u) => a + u.notional, 0),
             });
             notional = result.cappedPositionSizeDollars;
         }

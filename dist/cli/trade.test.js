@@ -80,6 +80,17 @@ test("--price 0 on add-unit is rejected with VALIDATION", async () => {
         await assert.rejects(() => handle("add-unit", [id, "--price", "0", "--stop", "100", "--risk", "100", "--notional", "1100"]), (e) => e.code === "VALIDATION");
     });
 });
+test("--size auto on add-unit caps at the remaining per-asset headroom", async () => {
+    await withHarness(async () => {
+        // 18000 of the default 20000 per-asset cap (100k capital, 20%) already on.
+        const opened = (await handle("open", ["BTC", "--direction", "long", "--price", "100", "--stop", "90", "--risk", "1800", "--notional", "18000", "--date", DATE]));
+        const id = String(opened.trade.id);
+        // No sizing plan exists, so add-unit falls back to sizeFromRiskAndStop:
+        // budget 100k * 2.5% * 0.6 = 1500, /0.1 stop = 15000, but only 2000 headroom.
+        const added = (await handle("add-unit", [id, "--price", "100", "--stop", "90", "--size", "auto", "--date", DATE]));
+        assert.equal(added.units[1]?.notional, 2000);
+    });
+});
 test("--stop 0 on set-stop is rejected with VALIDATION", async () => {
     await withHarness(async (file) => {
         const opened = (await handle("open", OPEN_ARGS));
@@ -228,7 +239,7 @@ test("trade show warns when coverage is older than today", async () => {
 });
 test("trade with no verb names the verbs instead of quoting undefined", async () => {
     await withHarness(async () => {
-        await assert.rejects(() => handle(undefined, []), (e) => e.code === "VALIDATION" && e.message === "trade requires a verb; try: open, add-unit, set-stop, exit, list, show");
+        await assert.rejects(() => handle(undefined, []), (e) => e.code === "VALIDATION" && e.message === "trade requires a verb; try: open, add-unit, set-stop, exit, edit, list, show");
     });
 });
 test("exit --fraction requires --unit", async () => {
