@@ -22,6 +22,17 @@ Every command prints one JSON envelope to stdout:
 Stop on any `ok:false` envelope, report the `code` and `message`, and exit with
 a non-zero status so the cron job surfaces the failure.
 
+## Execution
+
+Do this **entirely in one turn, synchronously, start to finish**. Do not
+delegate any research or scoring work to a subagent or background task, and
+do not stop partway through to "wait" for anything. This runs as an isolated
+cron session that cannot resume after yielding — work handed off to a
+subagent and waited on will be silently lost, and the run will report itself
+complete when it is not. If you need external data, fetch it inline yourself
+and keep going until every queued asset has a `janus score record` call and
+the report is written and pushed.
+
 ## Time anchor
 
 The session anchor is **today at 10:00 AM Eastern**, and it is a hard news
@@ -76,6 +87,35 @@ Prefer primary or exchange-verified data over social inference. If two sources
 conflict, weight the one tied to a verifiable number at or before the anchor.
 Everything in this list is subject to the 10:00 ET cutoff — news feeds and social
 especially, since those are the sources that update between one run and the next.
+
+## Citation logging
+
+`rationale` caps at 1-3 sentences (see below), which means most of what you
+actually check while researching an asset never survives into janus. Keep it
+instead: as you research each queued asset, note every source you consult —
+including the ones you reject — and write them out immediately after scoring
+that asset, before moving to the next one:
+
+```
+secondbrain/raw/sources/YYYY-MM-DD/<SYMBOL>.md
+```
+
+(relative to the workspace root the report itself is written into — create
+the date directory if it doesn't exist)
+
+```markdown
+# <SYMBOL> — sources checked, YYYY-MM-DD
+
+- **Used** — <headline/description> — <url> — published <date/time if known> — why it moved a factor: <1 line>
+- **Rejected** — <headline/description> — <url> — <reason: post-cutoff / unconfirmed / already priced / not asset-specific / etc.>
+```
+
+Compact citation records only — never paste full article text, just enough
+to identify and re-find the source later. Skip the file entirely for an
+asset where you found zero external sources (a pure price-action read
+doesn't need one). This is a side channel: it does not feed the report, and
+nothing here overrides `SCORE.md`'s own rules for what goes into `rationale`
+or the factors themselves.
 
 ## Command format
 
@@ -605,6 +645,13 @@ Stage only the report file — never `git add -A`, and never commit anything els
 the run happened to touch. If the commit or push fails (nothing to commit, no
 remote, rejected push), report the git error and stop; the report file on disk
 is still the deliverable.
+
+Before pushing, confirm you are inside the report repository, not any other
+tool repository that happens to share the working environment (`git remote
+-v` should show the reports repo's remote). If the push fails specifically
+with an SSH/publickey error, that is a strong sign you are in the wrong
+repository — say so explicitly rather than treating it as a generic push
+failure.
 
 ## What not to do
 
