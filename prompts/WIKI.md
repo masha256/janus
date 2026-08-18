@@ -19,7 +19,7 @@ Steps:
    - If a trade closed today (check `janus trade list` for any `closed_on` matching today's date), add an "Outcome" section to that asset's page the same way `UNI.md` and `ONDO.md` are structured in the existing backfill, with realized/net P&L pulled from `janus trade show <id>`.
    - If a trade opened today, update the page's header `Status` line to reflect the new open position (trade id, side, entry price, stop) — this is the one thing that DOES get overwritten each time it changes, since it's a current-status line, not a historical log entry.
 
-4. Read `secondbrain/raw/sources/YYYY-MM-DD/` if it exists (the citation logs from today's Score Phase run — only present if that job's prompt has been updated to write them, see `DRAFT-score-phase-prompt-with-citations.md`). If present, weave a brief "sources" note into today's new entry on the relevant asset page (e.g., "see raw/sources/YYYY-MM-DD/NVDA.md for citations") rather than duplicating the citation content into the wiki page itself.
+4. Read `secondbrain/raw/sources/YYYY-MM-DD/` if it exists (the citation logs from today's Score Phase run — only present if that job's prompt has been updated to write them, see `SCORE.md`). If present, weave a brief "sources" note into today's new entry on the relevant asset page (e.g., "see raw/sources/YYYY-MM-DD/NVDA.md for citations") rather than duplicating the citation content into the wiki page itself.
 
 5. Update `secondbrain/wiki/index.md`'s asset table: status column for any symbol whose position changed today (opened, closed, or directive changed in a way worth reflecting — new INITIATE/EXIT, not routine HOLD/STAND_ASIDE repeats).
 
