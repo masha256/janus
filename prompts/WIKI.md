@@ -1,17 +1,5 @@
-<!--
-DRAFT — a NEW cron job, not yet created. Staged as a file per Mike's
-request rather than created live. This is proposed config, not a running
-prompt — review before I (or you) create it.
 
-Proposed job settings:
-  name: "Daily Wiki Update"
-  schedule: cron, 15 min after Score Phase — "15 8 * * *" (8:15am PT)
-  sessionTarget: isolated
-  timeoutSeconds: 600
-  delivery: mode "none" (this is maintenance, not something Mike needs
-    pinged about daily — failures should still alert)
-  failureAlert: telegram, announce (same pattern as the other three jobs)
--->
+# WIKI — Daily asset second brain wiki update
 
 Load `secondbrain/SPEC.md` (relative to `/home/ubuntu/.openclaw/workspace-raymond`) and follow its write contract precisely. This job's only job is to keep `secondbrain/wiki/assets/` current — it does NOT touch `secondbrain/wiki/mechanics/`, `themes/`, or `watchlist.md` (those are out of scope until Mike explicitly expands this job).
 
