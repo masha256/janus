@@ -18,6 +18,15 @@ Every command prints one JSON envelope to stdout:
 Stop on any `ok:false` envelope, report the `code` and `message`, and exit with
 a non-zero status so the cron job surfaces the failure.
 
+## Execution
+
+Do this **entirely in one turn, synchronously, start to finish**. Do not
+delegate any research or scoring work to a subagent or background task, and
+do not stop partway through to "wait" for anything. This runs as an isolated
+cron session that cannot resume after yielding — work handed off to a
+subagent and waited on will be silently lost, and the run will report itself
+complete when it is not. If you need external data, fetch it inline yourself.
+
 ## Time anchor
 
 The anchor is **today at 10:00 AM Eastern Time** — thirty minutes after the U.S.
