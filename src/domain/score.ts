@@ -6,6 +6,7 @@ import type { CoverageValues } from "./coverage.ts";
 import { actionableNewSignal, decayGate, heatGate, regimeTriggerState, runGates } from "./gates.ts";
 import { sizeFromRiskAndStop, stopDistancePct, stopFromAtr } from "./sizing.ts";
 import { deriveLadderPlan, type LadderPlan } from "./ladder.ts";
+import { daysBetween } from "./session.ts";
 
 const clamp = (x: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, x));
 const boolParam = (params: Record<string, number>, key: string): boolean =>
@@ -63,6 +64,8 @@ export type ScoreContext = {
 };
 
 export type ScoreResult = {
+  /** Set on rows read back from the store; absent on a freshly derived score. */
+  session_date?: string;
   /** The standardised decision inputs, named for what they mean. */
   direction: number;
   conviction: number;
@@ -107,7 +110,8 @@ export function deriveScore(
   context: ScoreContext,
   params: Record<string, number>,
 ): ScoreResult {
-  const catalyst = requireFactor(metrics, "catalyst");
+  const catalystFresh = requireFactor(metrics, "catalyst");
+  const catalyst = effectiveCatalyst(catalystFresh, context, params);
   const trend = requireFactor(metrics, "trend");
   const secular = requireFactor(metrics, "secular");
   const crowding = requireCrowding(metrics);
@@ -195,7 +199,8 @@ export function deriveScore(
     ownPosition,
     context,
     catalyst,
-    metrics,
+    // Gates read the factor bag; hand them the effective catalyst, not the raw one.
+    { ...metrics, catalyst },
     params,
   );
 
@@ -205,6 +210,7 @@ export function deriveScore(
     directive: plan.directive,
     plan,
     results: {
+      catalyst_effective: catalyst,
       w_catalyst: wCat,
       w_sentiment: wSent,
       w_trend: wTrend,
@@ -222,6 +228,30 @@ export function deriveScore(
       total_abs_weight: totalAbsWeight,
     },
   };
+}
+
+/**
+ * Catalyst memory. The agent records only what is new today; the prior row's
+ * `catalyst_effective` is carried forward shrunk by `catalyst_decay_per_day`
+ * per calendar day. The larger magnitude wins, except that fresh news pointing
+ * the other way always wins — new information beats a fading old story.
+ */
+function effectiveCatalyst(
+  fresh: number,
+  context: ScoreContext,
+  params: Record<string, number>,
+): number {
+  const prior = context.recent_scores?.[0];
+  if (prior === undefined) return fresh;
+  const prev = num(prior.results, "catalyst_effective", 0);
+  if (prev === 0) return fresh;
+  const decay = params["catalyst_decay_per_day"] ?? 0.5;
+  const age = prior.session_date === undefined
+    ? 1
+    : (daysBetween(context.session_date, prior.session_date) ?? 1);
+  const carried = Math.sign(prev) * Math.max(0, Math.abs(prev) - decay * Math.max(age, 0));
+  if (fresh !== 0 && Math.sign(fresh) !== Math.sign(carried)) return fresh;
+  return Math.abs(carried) > Math.abs(fresh) ? carried : fresh;
 }
 
 function requireFactor(metrics: Metrics, key: string): number {
@@ -263,7 +293,9 @@ function sentimentFromCrowding(
     base = 1.0;
     summary = "12-25 - fear";
   } else if (P < 40) {
-    base = 0.75 * (40 - P) / 15.0;
+    // Floored at the calm-middle read in an uptrend: without the floor a
+    // crowd at 36 scored *less* bullish than one at 50, inverting the fade.
+    base = Math.max(0.75 * (40 - P) / 15.0, trend > 0 ? 0.4 : 0);
     summary = "25-40 - getting fearful (linear)";
   } else if (P < 65) {
     const s = trend > 0 ? 1.0 : (trend < 0 ? -1.0 : 0.0);

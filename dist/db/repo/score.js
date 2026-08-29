@@ -84,6 +84,7 @@ export function recentScores(db, assetId, beforeDate, limit) {
         const r = results.get(row.asset_id) ?? {};
         const plan = scorePlanFromResults(r);
         return {
+            session_date: row.session_date,
             direction: row.direction,
             conviction: row.conviction,
             directive: row.directive,

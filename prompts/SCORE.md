@@ -153,18 +153,20 @@ Examples:
 - Negative: hack/exploit, key departure, regulatory action, earnings miss,
   exchange delisting, major holder selling.
 
-If there is no *new* catalyst today, record the **most recent still-relevant**
-catalyst, decayed to a smaller magnitude. A catalyst remains relevant while its
-market impact is still observable: follow-through volume, ongoing inflows from a
-recent launch, a regulatory theme still unfolding, or a post-earnings drift that
-has not yet priced in.
+Record only what is **new today** (published before the cutoff). janus keeps
+the catalyst memory itself: yesterday's effective catalyst is carried forward
+and shrunk by `catalyst_decay_per_day` (default 0.5) per calendar day, and the
+larger of the carried value and today's fresh one is what the formula uses
+(`catalyst_effective` in the results). So a +2.0 event is still worth +1.5
+tomorrow and +1.0 the day after without you re-recording it.
 
-| Age / freshness | Score |
-| --- | --- |
-| New today, major | +1.5 / −1.5 to +2.0 / −2.0 |
-| New today, ordinary | +0.5 / −0.5 to +1.0 / −1.0 |
-| 1–2 days old, still driving flow | +0.5 / −0.5 to +1.0 / −1.0 |
-| Older or faded | 0 |
+- Nothing new today → record **0**, even if a recent catalyst is still
+  driving flow. Do not re-record or hand-decay yesterday's story; janus
+  already has it, and a hand-decayed guess only replaces a deterministic
+  number with a noisy one.
+- New information that points the **other way** always wins over the carried
+  value, so record a fresh negative at its own magnitude even while an older
+  positive is still decaying.
 
 Do not use trend or sentiment as a proxy for catalyst. If the only thing that
 changed is price or positioning, record **0**.
@@ -302,6 +304,8 @@ confidence is treated as zero.
 
 ## What janus computes from your factors
 
+- `catalyst_effective` is the larger of today's recorded catalyst and the prior
+  session's effective value decayed by `catalyst_decay_per_day` per day.
 - `sentiment` is derived from `crowding` with a fear premium on the bullish side
   and optional divergence/capitulation boosts.
 - `direction` is the weighted mean of `catalyst`, `sentiment`, `trend`,

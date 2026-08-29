@@ -3,6 +3,7 @@ import { num, requireNum } from "./metrics.js";
 import { actionableNewSignal, decayGate, heatGate, regimeTriggerState, runGates } from "./gates.js";
 import { sizeFromRiskAndStop, stopDistancePct, stopFromAtr } from "./sizing.js";
 import { deriveLadderPlan } from "./ladder.js";
+import { daysBetween } from "./session.js";
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 const boolParam = (params, key) => (params[key] ?? 0) !== 0;
 /**
@@ -44,7 +45,8 @@ const WEIGHT_FALLBACK = 0;
  * makes HOLD the default and resists flip-flopping.
  */
 export function deriveScore(metrics, context, params) {
-    const catalyst = requireFactor(metrics, "catalyst");
+    const catalystFresh = requireFactor(metrics, "catalyst");
+    const catalyst = effectiveCatalyst(catalystFresh, context, params);
     const trend = requireFactor(metrics, "trend");
     const secular = requireFactor(metrics, "secular");
     const crowding = requireCrowding(metrics);
@@ -106,13 +108,16 @@ export function deriveScore(metrics, context, params) {
     // derivePlan already attaches sizing_plan to the branches that build one, and
     // it is the last word on the plan: re-attaching it here would resurrect a
     // sizing instruction on a plan the stop ladder escalated to EXIT.
-    const { plan } = derivePlan(direction, roundedConviction, ownPosition, context, catalyst, metrics, params);
+    const { plan } = derivePlan(direction, roundedConviction, ownPosition, context, catalyst, 
+    // Gates read the factor bag; hand them the effective catalyst, not the raw one.
+    { ...metrics, catalyst }, params);
     return {
         direction,
         conviction: roundedConviction,
         directive: plan.directive,
         plan,
         results: {
+            catalyst_effective: catalyst,
             w_catalyst: wCat,
             w_sentiment: wSent,
             w_trend: wTrend,
@@ -130,6 +135,28 @@ export function deriveScore(metrics, context, params) {
             total_abs_weight: totalAbsWeight,
         },
     };
+}
+/**
+ * Catalyst memory. The agent records only what is new today; the prior row's
+ * `catalyst_effective` is carried forward shrunk by `catalyst_decay_per_day`
+ * per calendar day. The larger magnitude wins, except that fresh news pointing
+ * the other way always wins — new information beats a fading old story.
+ */
+function effectiveCatalyst(fresh, context, params) {
+    const prior = context.recent_scores?.[0];
+    if (prior === undefined)
+        return fresh;
+    const prev = num(prior.results, "catalyst_effective", 0);
+    if (prev === 0)
+        return fresh;
+    const decay = params["catalyst_decay_per_day"] ?? 0.5;
+    const age = prior.session_date === undefined
+        ? 1
+        : (daysBetween(context.session_date, prior.session_date) ?? 1);
+    const carried = Math.sign(prev) * Math.max(0, Math.abs(prev) - decay * Math.max(age, 0));
+    if (fresh !== 0 && Math.sign(fresh) !== Math.sign(carried))
+        return fresh;
+    return Math.abs(carried) > Math.abs(fresh) ? carried : fresh;
 }
 function requireFactor(metrics, key) {
     const value = metrics[key];
@@ -157,7 +184,9 @@ function sentimentFromCrowding(P, trend, capitulation, divergence, fearPremium, 
         summary = "12-25 - fear";
     }
     else if (P < 40) {
-        base = 0.75 * (40 - P) / 15.0;
+        // Floored at the calm-middle read in an uptrend: without the floor a
+        // crowd at 36 scored *less* bullish than one at 50, inverting the fade.
+        base = Math.max(0.75 * (40 - P) / 15.0, trend > 0 ? 0.4 : 0);
         summary = "25-40 - getting fearful (linear)";
     }
     else if (P < 65) {

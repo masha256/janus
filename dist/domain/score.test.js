@@ -631,3 +631,51 @@ test("the divergence factor makes a TRIM actionable instead of downgrading it", 
     assert.equal(diverging.plan.persistence_rule, "fresh_signal");
     assert.equal(diverging.plan.trim_plan?.target_units, 1);
 });
+// Catalyst memory: the agent records what is new today; janus carries the prior
+// effective catalyst forward, decayed by catalyst_decay_per_day per calendar day.
+function priorWithCatalyst(catalystEffective, session_date) {
+    return {
+        session_date, direction: 0.5, conviction: 4, directive: "STAND_ASIDE",
+        plan: {
+            directive: "STAND_ASIDE", reason: "prior", size_tier: "blocked",
+            signal_gate: "fail", persistence_gate: "fail", trend_gate: "pass",
+            binary_gate: "pass", heat_gate: "pass", flipflop_gate: "n/a",
+        },
+        results: { catalyst_effective: catalystEffective },
+    };
+}
+test("catalyst decays from the prior effective value when today records nothing new", () => {
+    // 1.5 yesterday, 0.5/day decay, today 0 -> effective 1.0
+    const got = deriveScore(m(0, 1, 0, 50, false, false), ctxWithPosition({ side: null, units: 0 }, coverage(), priorWithCatalyst(1.5, "2026-07-30")), DEFAULT_PARAMS);
+    assert.equal(got.results["catalyst_effective"], 1.0);
+    // and it moved direction: 0.15 * 1.0 more than the same read with no prior
+    const bare = deriveScore(m(0, 1, 0, 50, false, false), flat, DEFAULT_PARAMS);
+    assert.ok(Math.abs(got.direction - bare.direction - 0.15) < 1e-9, `got ${got.direction} vs ${bare.direction}`);
+});
+test("catalyst decay is per calendar day and bottoms at zero", () => {
+    const got = deriveScore(m(0, 1, 0, 50, false, false), ctxWithPosition({ side: null, units: 0 }, coverage(), priorWithCatalyst(1.0, "2026-07-27")), DEFAULT_PARAMS);
+    assert.equal(got.results["catalyst_effective"], 0);
+});
+test("a fresh catalyst beats the carried one when larger, and always when it points the other way", () => {
+    const bigger = deriveScore(m(2.0, 1, 0, 50, false, false), ctxWithPosition({ side: null, units: 0 }, coverage(), priorWithCatalyst(1.5, "2026-07-30")), DEFAULT_PARAMS);
+    assert.equal(bigger.results["catalyst_effective"], 2.0);
+    const flipped = deriveScore(m(-0.5, 1, 0, 50, false, false), ctxWithPosition({ side: null, units: 0 }, coverage(), priorWithCatalyst(1.5, "2026-07-30")), DEFAULT_PARAMS);
+    assert.equal(flipped.results["catalyst_effective"], -0.5);
+});
+test("a legacy prior without catalyst_effective carries nothing", () => {
+    const prior = priorWithCatalyst(1.5, "2026-07-30");
+    prior.results = {};
+    const got = deriveScore(m(0, 1, 0, 50, false, false), ctxWithPosition({ side: null, units: 0 }, coverage(), prior), DEFAULT_PARAMS);
+    assert.equal(got.results["catalyst_effective"], 0);
+});
+test("mild fear in an uptrend is never read as less bullish than a calm crowd", () => {
+    // Crowding 36: the linear fear band alone gives 0.75*4/15 = 0.2, below the
+    // calm-middle 0.4. Floor it at the calm read so the contrarian curve is monotonic.
+    const only = { ...DEFAULT_PARAMS, w_catalyst: 0, w_trend: 0, w_secular: 0, w_regime: 0, w_sentiment: 1 };
+    const fearful = deriveScore(m(0, 1, 0, 36, false, false), flat, only);
+    const calm = deriveScore(m(0, 1, 0, 50, false, false), flat, only);
+    assert.equal(fearful.results["sentiment"], calm.results["sentiment"]); // both 0.4 * 1.25
+    // With no uptrend to lean on, the fear band keeps its own (positive) value.
+    const fearfulDown = deriveScore(m(0, -1, 0, 36, false, false), flat, only);
+    assert.ok(Math.abs(Number(fearfulDown.results["sentiment"]) - 0.25) < 1e-9);
+});

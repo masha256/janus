@@ -188,6 +188,7 @@ test("the full daily pipeline runs end to end", async () => {
     const results = scored.body.data.results;
     const volatile = new Set(["sentiment", "agreement", "weighted_sum"]);
     assert.deepEqual(Object.fromEntries(Object.keys(results).filter((k) => !volatile.has(k)).map((k) => [k, results[k]])), {
+        catalyst_effective: 2,
         w_catalyst: 0.15, w_sentiment: 0.3, w_trend: 0.3, w_regime: 0.15, w_secular: 0.1,
         fear_premium: 1.25,
         divergence_boost: 0.5,

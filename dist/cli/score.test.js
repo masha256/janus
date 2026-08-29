@@ -125,7 +125,7 @@ test("re-scoring replaces the previous metric rows rather than merging them", as
                 .all(DATE, id).map((r) => r.key);
             assert.deepEqual(keys("score_metric"), ["catalyst", "crowding", "divergence", "secular", "trend"], "stale factors must not survive");
             assert.deepEqual(keys("score_result"), [
-                "agreement", "binary_gate", "confidence", "directive_reason", "divergence_boost", "fear_premium",
+                "agreement", "binary_gate", "catalyst_effective", "confidence", "directive_reason", "divergence_boost", "fear_premium",
                 "flipflop_gate", "heat_gate", "persistence_gate", "persistence_rule", "plan_directive", "regime",
                 "regime_smile", "regime_trigger", "sentiment", "sentiment_summary", "signal_gate", "size_tier",
                 "total_abs_weight", "trend_gate", "w_catalyst", "w_regime", "w_secular", "w_sentiment", "w_trend",

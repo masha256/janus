@@ -288,7 +288,7 @@ or blocked.
 | Gate | Purpose | Result values |
 | --- | --- | --- |
 | `signalGate` | Direction/conviction thresholds for initiate, add, and exit. | `pass` / `fail` |
-| `persistenceGate` | Signal must persist for `signal_persist_days` run-days. | `pass` / `fail` |
+| `persistenceGate` | Signal must persist for `signal_persist_days` run-days: today at the initiate bar, each prior print at `signal_direction_persist` and within `signal_persist_window_days`. | `pass` / `fail` |
 | `trendGate` | Price/MA structure for the proposed direction. | `pass` / `starter` / `fail` / `late_trend` |
 | `binaryGate` | Blocks entry around a known binary event recorded on the screen. | `pass` / `blocked` |
 | `heatGate` | Account-level risk heat against `max_heat_pct` of `account_capital`. | `pass` / `blocked` |
@@ -314,7 +314,10 @@ HOLD/EXIT/TRIM directives still carry the gate status for observability.
 | `signal_direction_add` | signalGate | `1.0` | Minimum `\|direction\|` for an aligned position to pass the signal gate for adding. |
 | `signal_conviction_add` | signalGate | `6` | Minimum `conviction` for an aligned position to pass the signal gate for adding. |
 | `signal_direction_exit` | signalGate | `1.0` | Minimum `\|direction\|` against an open position to pass the signal gate for exit. |
-| `signal_persist_days` | persistenceGate | `2` | Run-days the signal gate must have passed, including today. |
+| `signal_persist_days` | persistenceGate | `2` | Run-days the signal must have persisted, including today. |
+| `signal_direction_persist` | persistenceGate | `0.8` | Minimum `\|direction\|` a *prior* print needs to count toward persistence (hysteresis below the initiate bar). |
+| `signal_persist_window_days` | persistenceGate | `3` | Maximum calendar days between consecutive persisting prints; an older print is not persistence. |
+| `catalyst_persist_override` | persistenceGate | `0` | `\|catalyst_effective\|` at or above this passes the persistence gate on its own; `0` disables. |
 | `decay_conviction_floor` | decayGate | `4` | `conviction` below this counts the day toward a decay run. |
 | `decay_persist_days` | decayGate | `2` | Consecutive run-days below the floor that trigger a decay exit, including today. |
 | `decay_direction_deadband` | decayGate | `0.1` | How far a prior day's `direction` must go against the position to break the decay run. Inside the band the read is noise, not a flip; today's direction is not tested at all. |
@@ -535,6 +538,7 @@ each parameter does; the table below is a compact reference.
 | `beta_factor` | screen | `1.0` | Multiplier applied to the raw screen score before the threshold check. |
 | `screen_threshold` | screen | `4.0` | Minimum `screen_score` for an asset to be flagged for the scoring queue. |
 | `w_catalyst` | score | `0.15` | Weight of the momentum/catalyst factor in `direction`. |
+| `catalyst_decay_per_day` | score | `0.5` | How much the prior `catalyst_effective` shrinks per calendar day before being compared with today's fresh catalyst. |
 | `w_sentiment` | score | `0.30` | Weight of the contrarian positioning/crowding factor in `direction`. |
 | `w_trend` | score | `0.30` | Weight of the trend/flow factor in `direction`. |
 | `w_regime` | score | `0.15` | Weight of the session's `regime_smile` in `direction`. |

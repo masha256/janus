@@ -35,8 +35,22 @@ export const DEFAULT_PARAMS = {
     signal_direction_add: 1.0,
     signal_conviction_add: 6,
     signal_direction_exit: 1.0,
-    // persistenceGate — how many run-days the signalGate must have passed.
+    // persistenceGate — how many run-days the signal must have persisted. Today
+    // must clear the initiate bar; each prior print only needs to clear
+    // signal_direction_persist (hysteresis — a 0.85 the day after a 0.95 is the
+    // same thesis, not a new one) and must fall within signal_persist_window_days
+    // of the print after it (a strong read two weeks ago is not persistence).
     signal_persist_days: 2,
+    signal_direction_persist: 0.8,
+    signal_persist_window_days: 3,
+    // Catalyst memory. The agent records only what is new today; janus carries
+    // the prior effective catalyst forward, shrinking it by catalyst_decay_per_day
+    // per calendar day, and uses whichever is larger. catalyst_persist_override
+    // lets |catalyst_effective| at or above it satisfy the persistence gate on
+    // its own; 0 disables it (replay of Aug 2026 showed same-day news entries
+    // are late by construction under the 10:00 ET cutoff).
+    catalyst_decay_per_day: 0.5,
+    catalyst_persist_override: 0,
     // decayGate — conviction floor and how many run-days below it triggers decay.
     // The deadband is how far against us a prior day's direction must go to break
     // the streak; inside it the read is noise, not a flip.

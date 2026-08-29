@@ -1,13 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { actionableNewSignal, decayGate } from "./gates.ts";
+import { actionableNewSignal, decayGate, persistenceGate } from "./gates.ts";
 import type { ScoreResult } from "./score.ts";
 
 const PARAMS = { decay_conviction_floor: 4, decay_persist_days: 2 };
 
 // Only direction and conviction are read; the rest satisfies the type.
-function score(direction: number, conviction: number): ScoreResult {
+function score(direction: number, conviction: number, session_date?: string): ScoreResult {
   return {
+    session_date,
     direction,
     conviction,
     directive: "HOLD",
@@ -75,4 +76,37 @@ test("actionableNewSignal short-circuits on the score's own boolean factors", ()
 
   // Falsy values must not trip it — 0 is what the prompts record for "no".
   assert.equal(actionableNewSignal(0.5, 0, { capitulation: 0, divergence: 0 }, prev, params), false);
+});
+
+// persistenceGate: today must clear the initiate bar (the signal gate owns that);
+// the prior print only needs to clear signal_direction_persist, and it must be
+// recent. A ≥0.9 print from two weeks ago is not persistence; yesterday's 0.85 is.
+const PG = { signal_persist_days: 2, signal_direction_persist: 0.8, signal_persist_window_days: 3 };
+const TODAY = "2026-08-20";
+
+test("persistence: yesterday at 0.85 same side passes (hysteresis below the initiate bar)", () => {
+  assert.equal(persistenceGate(1.0, 6, "long", [score(0.85, 5, "2026-08-19")], PG, TODAY), "pass");
+});
+
+test("persistence: prior below signal_direction_persist fails", () => {
+  assert.equal(persistenceGate(1.0, 6, "long", [score(0.75, 5, "2026-08-19")], PG, TODAY), "fail");
+});
+
+test("persistence: prior outside the window fails even when strong", () => {
+  assert.equal(persistenceGate(1.0, 6, "long", [score(1.2, 7, "2026-08-16")], PG, TODAY), "fail");
+  assert.equal(persistenceGate(1.0, 6, "long", [score(1.2, 7, "2026-08-17")], PG, TODAY), "pass");
+});
+
+test("persistence: opposite side prior fails", () => {
+  assert.equal(persistenceGate(1.0, 6, "long", [score(-0.9, 6, "2026-08-19")], PG, TODAY), "fail");
+});
+
+test("persistence: a prior without a date is treated as fresh (legacy rows)", () => {
+  assert.equal(persistenceGate(1.0, 6, "long", [score(0.9, 6)], PG, TODAY), "pass");
+});
+
+test("persistence: no prior fails, unless a big enough catalyst overrides and the override is on", () => {
+  assert.equal(persistenceGate(1.0, 6, "long", [], PG, TODAY, 2.0), "fail");
+  assert.equal(persistenceGate(1.0, 6, "long", [], { ...PG, catalyst_persist_override: 1.5 }, TODAY, 2.0), "pass");
+  assert.equal(persistenceGate(1.0, 6, "long", [], { ...PG, catalyst_persist_override: 1.5 }, TODAY, 1.0), "fail");
 });

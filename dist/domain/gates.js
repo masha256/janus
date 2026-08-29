@@ -25,24 +25,36 @@ export function signalGate(direction, conviction, position, params) {
     // at least hold-quality signal is present (so HOLD is not treated as a failure).
     return absDirection >= directionAdd && conviction >= convAdd ? "pass" : "fail";
 }
-export function persistenceGate(direction, conviction, side, recentScores, params) {
+export function persistenceGate(direction, conviction, side, recentScores, params, sessionDate, 
+/** Today's effective catalyst, for the optional override. */
+catalyst = 0) {
+    const override = params["catalyst_persist_override"] ?? 0;
+    if (override > 0 && Math.abs(catalyst) >= override)
+        return "pass";
     const required = Math.max(1, Math.round(params["signal_persist_days"] ?? 2));
     if (recentScores.length < required - 1) {
         // Need at least N-1 prior scores plus today; without them the signal has not persisted.
         return "fail";
     }
-    const directionInitiate = params["signal_direction_initiate"] ?? 0.9;
-    const convInitiate = params["signal_conviction_initiate"] ?? 6;
-    // Walk backwards through recent scores (newest first). Count consecutive days
-    // where the same-side signal would have passed the initiate threshold.
+    const priorMin = params["signal_direction_persist"] ?? 0.8;
+    const window = params["signal_persist_window_days"] ?? 3;
+    // Walk backwards through recent scores (newest first). Count consecutive
+    // prints on the same side that clear the persist bar and sit within the
+    // window of the print after them. A prior without a date (legacy row) is
+    // treated as fresh.
     let count = 1; // today counts once signalGate already passed
+    let newer = sessionDate;
     for (const score of recentScores) {
         const sameSide = side === null
             ? false
             : (side === "long" && score.direction > 0) || (side === "short" && score.direction < 0);
-        const absDirection = Math.abs(score.direction);
-        if (sameSide && absDirection >= directionInitiate && score.conviction >= convInitiate) {
+        const age = newer === undefined || score.session_date === undefined
+            ? 0
+            : daysBetween(newer, score.session_date);
+        const fresh = age !== null && age <= window;
+        if (sameSide && fresh && Math.abs(score.direction) >= priorMin) {
             count++;
+            newer = score.session_date ?? newer;
         }
         else {
             break;
@@ -184,8 +196,11 @@ export function actionableNewSignal(direction, catalyst, metrics, previousScore,
 export function runGates(direction, conviction, position, metrics, ctx) {
     const side = direction > 0 ? "long" : direction < 0 ? "short" : null;
     const crowding = num(metrics, "crowding", 50);
+    // `catalyst` here is the effective (carried + decayed) value deriveScore
+    // substituted into the bag, not the raw factor the agent recorded.
+    const catalyst = num(metrics, "catalyst", 0);
     const signal = signalGate(direction, conviction, position, ctx.params);
-    const persistence = persistenceGate(direction, conviction, side, ctx.recentScores, ctx.params);
+    const persistence = persistenceGate(direction, conviction, side, ctx.recentScores, ctx.params, ctx.sessionDate, catalyst);
     const trend = trendGate(side, ctx.coverage, crowding, ctx.params);
     const binary = binaryGate(ctx.sessionDate, ctx.binary, ctx.params);
     const heat = heatGate(ctx.params, ctx.currentHeat, ctx.proposedHeat);
