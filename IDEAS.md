@@ -4,9 +4,10 @@ Changes considered but not made. Each entry says what the idea is, what
 evidence prompted it, and what would have to be true to justify doing it.
 Move an entry to `CHANGELOG.md` when it ships; delete it if it is disproven.
 
-Evidence base as of 2026-08-29: 25 live sessions, 263 score rows, 4 INITIATEs,
-2 executed trades. Everything below is mechanism-motivated; none of it is
-validated by returns yet.
+Evidence base as of 2026-09-05: 32 live sessions, 365 score rows, 6 INITIATEs,
+4 executed trades (2 closed). Everything below is mechanism-motivated; the
+class split under "Signal quality by class" is the first entry with a
+forward-return tally behind it.
 
 ## Scoring
 
@@ -20,7 +21,9 @@ and `open_interest`. Have `deriveScore` compute the anchor band from the
 prompt's own table and clamp the agent's `crowding` to anchor ± N (param,
 e.g. 10). Store both `crowding_anchor` and `crowding_clamped`.
 **Do it when** day-2 sentiment drift is still the top persistence killer after
-the 2026-08-29 hysteresis change has run for a few weeks.
+the 2026-08-29 hysteresis change has run for a few weeks. Week of 09-05: the
+day-2 leak was trend (−0.25), not crowding (n=4); the trend-rung rule added to
+`SCORE.md` on 09-05 targets that. Re-measure before acting here.
 **Risk.** Equity perps have pinned-zero funding; the anchor is only meaningful
 for crypto. Needs a per-class fallback (premium + OI trend) or class-scoped
 params.
@@ -107,6 +110,13 @@ vetoed CRV 08-16 was +29% in 5 sessions. If an asset truly can't be held,
 deactivate it (`asset.active = 0`) rather than silently skipping — the
 system should only score what will be acted on.
 
+### Roster dead weight
+INTC, POL and TRX have 0 screen flags in 32 sessions; AVAX, LINEA, MNT, ORCL,
+STRC and XLM have 1 (Q14, 2026-09-05). Deactivating them costs nothing in
+signal and removes coverage/screen work, but the operator wants a longer run
+first. **Do it when** an asset is still at 0 flags after 60 sessions, or at
+≤ 2 flags after 90. Check Q14 each review.
+
 ### Paper-track unexecuted directives
 If vetoes ever return, record them (`trade open --paper` or a `veto` event)
 so the report can show what the system would have done. Cheap insurance for
@@ -124,6 +134,22 @@ half.
 In the replay window every added equity long lost and every added crypto-alt
 long won. n is tiny, but if it persists it argues for either class-aware
 weights (above) or dropping unclustered equities from the roster.
+
+**It persisted.** Tally at 2026-09-05 (Q17, full history; fwd10 = close-to-close
+10 sessions after a flat print at |direction| ≥ 0.8 that did not INITIATE):
+
+| class | near-misses w/ fwd10 | mean fwd10 | hit rate |
+| --- | --- | --- | --- |
+| crypto | 37 | +12.8% | 28/37 (76%) |
+| equity | 19 | −3.3% | 2/19 (11%) |
+
+Excluding the 08-13..08-21 crypto melt-up: crypto 10/13 (+6.6%), equity 1/10
+(−2.5%). MSFT alone is 0/6. The one equity INITIATE (NVDA 08-12) lost −1.01R.
+**Do it when** the equity side reaches ≥ 30 near-misses with fwd10 spanning
+at least two calendar months and the hit rate is still < 35%; then choose
+between class-aware weights and deactivating unclustered equity longs. Until
+then the gate is already keeping equities out (0 equity entries since 08-12),
+so the cost of waiting is low. Re-check the tally in every weekly review.
 
 ## Reports
 

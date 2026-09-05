@@ -164,6 +164,15 @@ tomorrow and +1.0 the day after without you re-recording it.
   driving flow. Do not re-record or hand-decay yesterday's story; janus
   already has it, and a hand-decayed guess only replaces a deterministic
   number with a noisy one.
+- **A story that appears in a prior session's rationale is not new**, however
+  much follow-up coverage it gets today. Before recording a nonzero catalyst,
+  check the asset's recent rationales (`janus score list --date <previous
+  session>`); if the story is there, record 0. In the week of 2026-08-29 the
+  same Moonshot, France/Palantir and Schwab stories were re-recorded two and
+  three sessions apart, which is why `catalyst_effective` differed from the
+  recorded value on only 3 of 102 rows.
+- Backward-looking data prints are not events: a monthly OI figure, a
+  cumulative-volume milestone, an "Nth straight week of buying" — record 0.
 - New information that points the **other way** always wins over the carried
   value, so record a fresh negative at its own magnitude even while an older
   positive is still decaying.
@@ -189,6 +198,14 @@ Price structure and persistence. Read from the coverage snapshot:
 
 Use momentum acceleration or deceleration to move within the band, not to flip
 the sign by itself.
+
+The rung is read from the coverage row, so it moves only when a moving-average
+or cross state changes. A change of **1.0 or more** from yesterday's trend on a
+day where `daily_change_pct` is inside ±2% must name the rung that changed in
+the rationale (which MA was lost or regained, which cross flipped). If no rung
+changed, the score stays on yesterday's rung and deceleration moves it by at
+most 0.5. An asset above all three MAs with a golden cross intact is +1.5 on a
+red day too.
 
 ### Secular (−2..+2)
 

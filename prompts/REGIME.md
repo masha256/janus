@@ -173,12 +173,13 @@ and `description` from `janus cluster list` to understand what it represents.
    - **Momentum acceleration:** volume-weighted momentum (price change × relative volume) is in the top/bottom 25% of the last 90 days.
    - **Funding / social:** perp funding rate, social volume, or sentiment has shifted by more than 1 standard deviation vs its 30-day cluster baseline.
    - **Live catalyst:** a scheduled or surprise event directly affecting the cluster (earnings, unlock, regulatory ruling, protocol upgrade, etc.) published before the 10:00 ET cutoff.
+   - **Flows:** ETF creations/redemptions, exchange net flows, stablecoin supply. Use the **rolling 5-session sum**, never a single day's print: daily spot-ETF flow swings ±$200M on consecutive days as a matter of course, and in the week of 2026-08-29 the crypto delta flipped sign four times in eight sessions on exactly that. The flow signal changes only when the 5-session sum changes sign or moves by more than its own 30-day standard deviation; cite the sum, not the day.
 
-4. **Do not double-count the macro.** The dollar, 10-year, VIX, credit spreads, and breadth are already in the macro regime. Only cluster-specific information should move the delta.
+4. **Do not double-count the macro.** The dollar, 10-year, VIX, credit spreads, and breadth are already in the macro regime. Only cluster-specific information should move the delta. Likewise, in a **single-name cluster** the name's own daily price move is already its `trend` factor; it is not a cluster signal, so the delta there stays 0 unless a live catalyst or flow signal exists.
 
 5. **Discount high-beta clusters.** If the cluster's historical beta to the broad index is > 0.85, reduce the delta by up to 50% unless the signal is genuinely idiosyncratic. Low-beta / idiosyncratic clusters can take the full delta.
 
-6. **Direction overrides need two signals.** A cluster regime should rarely flip sign vs the macro. A sign flip requires two independent cluster-specific signals pointing the opposite way. A single story or tweet thread is not enough.
+6. **Direction overrides need two signals.** A cluster regime should rarely flip sign vs the macro, and the **delta itself** should rarely flip sign day to day. Either flip requires two independent cluster-specific signals pointing the new way. A single story, tweet thread, or one day's flow print is not enough; if you find yourself writing "a single signal rather than the two needed, but…", the delta stays where it was.
 
 7. **Default to macro when uncertain.** If you cannot name a specific cluster signal that moved since the last anchor, the cluster regime equals the macro regime. "Crypto feels heavy" is not a signal; "BTC funding turned negative for the first time in 30 days" is.
 

@@ -6,6 +6,63 @@ expected to do. Newest first. Earlier history lives in `git log`.
 
 Companion file: `IDEAS.md` holds changes considered but not made.
 
+## 2026-09-05 — prompt rules for cluster flows, catalyst re-records, trend rungs
+
+**Context.** First weekly review (`reviews/2026-09-05.md`; 8 sessions since
+the 08-29 change, 32 live sessions total). Formulas and parameters were left
+alone; the week's leaks were all on the input side, so the changes are to the
+agent prompts. No parameter changed.
+
+**What the data said** (query numbers refer to `prompts/review/queries.sql`):
+
+- The crypto cluster delta vs macro flipped sign four times in eight sessions
+  (08-29 −0.4, 09-01 +0.2, 09-02 −0.2, 09-03 +0.2), each on a single day's
+  spot-ETF flow print (−$202M, +$217M, −$237M, +$101M). The 09-02 summary
+  said "a single concrete signal rather than the two independent signals
+  needed to flip sign" and flipped anyway. The PLTR-only AI/Software cluster
+  went −0.6 → −1.0 on PLTR's own −4% day, double-counting its trend factor.
+- Catalyst memory engaged (`catalyst_effective` ≠ `catalyst`) on 3 of 102
+  rows because the agent re-recorded stories it had already recorded: MSFT
+  Moonshot 08-29 and 08-31, PLTR France 08-29 and 09-01, LINK nonzero three
+  sessions running, LIT 0.5 for a backward-looking monthly OI print. Nonzero
+  share is falling as intended (W33 55% → W34 40% → W35 31%, Q11).
+- Trend was re-read down a full point on sub-2% days against the prompt's
+  own table: BTC 08-29 1.5→0.5 (−0.5%), CRV 09-02 2.0→1.0 (−1.9%), LIT 09-05
+  2.0→1.0 (−0.7%), all still above every MA with a golden cross (Q10). The
+  day-2 leak after a signal pass this week was trend (−0.25), not sentiment
+  (n=4).
+- Both INITIATEs (LINK 08-30, LIT 09-04) fail the pre-08-29 persistence gate
+  (prior 0.84; prior conviction 5), so the hysteresis change produced both.
+
+**Changes.**
+
+1. `prompts/REGIME.md`: new **Flows** signal type — rolling 5-session sum,
+   never a single day's print; the signal changes only when the sum flips
+   sign or moves more than its 30-day standard deviation. Rule 6 now applies
+   to the delta's sign as well as the regime's. Rule 4 adds that a
+   single-name cluster's own daily move is its `trend` factor, not a cluster
+   signal.
+2. `prompts/SCORE.md`, catalyst: a story present in a prior session's
+   rationale is not new (check `janus score list --date <previous session>`
+   first); backward-looking data prints record 0.
+3. `prompts/SCORE.md`, trend: the rung is read from the coverage row; a
+   change of ≥ 1.0 on a day inside ±2% must name the MA or cross that
+   changed, otherwise stay on yesterday's rung (deceleration ≤ 0.5).
+4. Roster: LIT notes now identify it as Lighter's own token (market 120),
+   ending the Litentry / Lit Protocol / Lighter identity drift in rationales.
+5. Review tooling: `prompts/review/queries.sql` Q15 widened, Q16 (fill vs
+   plan) and Q17 (near-miss forward returns by class) added.
+
+**Expected effect.** Crypto cluster delta sign flips ≤ 1 per week; catalyst
+memory engaging on well above 3% of rows with no story repeated across
+sessions; every Q10 trend row under 2% citing a rung. Direction impact is
+small per row (`w_regime` 0.12–0.15, so a delta flip is ≤ 0.1 of direction)
+but that is exactly the 0.85-to-0.95 margin the signal gate lives on.
+
+**Left alone, on purpose.** INTC, POL, TRX (0 flags in 32 sessions) stay
+active for now — see `IDEAS.md`. Fill-vs-plan sizing rule (LIT risk ran
++8.3% over plan, ZEC +8.0%) is an operator procedure still under discussion.
+
 ## 2026-08-29 — persistence hysteresis, catalyst memory, sentiment floor
 
 **Context.** Review of the first 25 live sessions (2026-08-05 → 08-29, 263
